@@ -5,3 +5,14 @@
 > -- Charlie Stross, [*Accelerando*](https://www.antipope.org/charlie/blog-static/fiction/accelerando/accelerando.html)
 
 ~ insert dragons here ~
+
+## Setting up
+
+To install a local development version using pip:
+```
+pip install -e ".[test]"
+```
+Running the tests:
+```
+pytest .
+```
