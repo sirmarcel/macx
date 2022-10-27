@@ -1,5 +1,6 @@
 import macx
 
+
 def test_preprocessing():
     # TODO add tests
     some_property1 = True

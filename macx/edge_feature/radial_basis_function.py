@@ -8,7 +8,7 @@ from typing import Callable, Union
 Array = Union[np.ndarray, jnp.ndarray]
 
 
-def safe_mask(mask, fn: Callable, operand: Array, placeholder: float = 0.) -> Array:
+def safe_mask(mask, fn: Callable, operand: Array, placeholder: float = 0.0) -> Array:
     """
     Safe mask which ensures that gradients flow nicely. See also
     https://github.com/google/jax-md/blob/b4bce7ab9b37b6b9b2d0a5f02c143aeeb4e2a560/jax_md/util.py#L67
@@ -43,24 +43,25 @@ class BesselBasis(hk.Module):
         _r = r[..., None]  # shape: (P,1)
         f = lambda x: jnp.sin(jnp.pi / self.r_cut * self.offsets * x) / x
 
-        basis = safe_mask(mask=_r != 0,
-                         fn=f,
-                         operand=_r,
-                         placeholder=0.)  # shape: (P, n_rbf)
+        basis = safe_mask(
+            mask=_r != 0, fn=f, operand=_r, placeholder=0.0
+        )  # shape: (P, n_rbf)
 
         fc = self.cutoff_fn(r)  # shape: (P)
 
         return fc[..., None] * basis  # shape: (P, n_rbf)
 
-class CosineCutoff(hk.Module):
 
+class CosineCutoff(hk.Module):
     def __init__(self, r_cut: float):
         super().__init__()
         self.r_cut = jnp.float32(r_cut)
 
     def __call__(self, dR: Array) -> Array:
         cutoff_fn = lambda x: 0.5 * (jnp.cos(x * jnp.pi / self.r_cut) + 1.0)
-        return safe_mask(mask=(dR < self.r_cut),
-                         fn=cutoff_fn,
-                         operand=dR,
-                         placeholder=jnp.float32(0.))
+        return safe_mask(
+            mask=(dR < self.r_cut),
+            fn=cutoff_fn,
+            operand=dR,
+            placeholder=jnp.float32(0.0),
+        )
