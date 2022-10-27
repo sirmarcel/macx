@@ -2,10 +2,11 @@ import setuptools
 
 base_requires = [
     'jax>=0.3.23',
-    'e3nn-jax>=0.10.1'
+    'e3nn-jax>=0.10.1',
 ]
 test_requires = [
     'pytest',
+    'mace',
 ]
 
 setuptools.setup(
