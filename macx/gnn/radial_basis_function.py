@@ -1,9 +1,10 @@
+from typing import Callable, Union
+
+import e3nn_jax as e3nn
+import haiku as hk
 import jax
 import jax.numpy as jnp
 import numpy as np
-import haiku as hk
-import e3nn_jax as e3nn
-from typing import Callable, Union
 
 Array = Union[np.ndarray, jnp.ndarray]
 

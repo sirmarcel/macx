@@ -1,6 +1,7 @@
-from .symmetric_conctraction import SymmetricContraction
-from ..gnn import GraphNeuralNetwork, MessagePassingLayer
 from jax import ops
+
+from ..gnn import GraphNeuralNetwork, MessagePassingLayer
+from .symmetric_contraction import SymmetricContraction
 
 
 class ACELayer(MessagePassingLayer):

@@ -1,7 +1,8 @@
-from opt_einsum import contract
-from ..jaxext import contract_with_irrep_array
-import jax
 import haiku as hk
+import jax
+from opt_einsum import contract
+
+from ..jaxext import contract_with_irrep_array
 
 
 class SymmetricContraction(hk.Module):
