@@ -74,6 +74,7 @@ class EdgeFeature(hk.Module):
         return e3nn.IrrepsArray(self.irreps_out, A_ij.reshape(A_ij.shape[0], -1))
 
 
+
 # implemented elsewhere
 #
 # class Aggregation(hk.Module):
