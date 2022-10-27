@@ -6,7 +6,7 @@ base_requires = [
 ]
 test_requires = [
     'pytest',
-    'mace',
+    'mace @ git+ssh://git@github.com/ACEsuit/mace#egg=mace',
 ]
 
 setuptools.setup(
