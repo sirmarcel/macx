@@ -14,10 +14,10 @@ Array = Union[np.ndarray, jnp.ndarray]
 
 
 def generate_irreps_string(l_max, n_rbf):
-    degrees = np.arange(l_max+1)
+    degrees = np.arange(l_max + 1)
     s = []
-    for n, y, d in zip([n_rbf]*len(degrees), "y"*len(degrees), degrees):
-        s += [str(n)+"x"+str(d)+y]
+    for n, y, d in zip([n_rbf] * len(degrees), "y" * len(degrees), degrees):
+        s += [str(n) + "x" + str(d) + y]
     s = "+".join(s)
     return s
 
