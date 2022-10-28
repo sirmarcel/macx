@@ -7,21 +7,20 @@ from ..tools.cg import U_matrix_real
 
 
 class SymmetricContraction(hk.Module):
-    def __init__(self, irreps_in, irreps_out, max_body_order, trainable_weights=True):
+    def __init__(self, irreps_in, irreps_out, max_body_order):
         super().__init__()
-        self.irreps_in = irreps_in
         self.irreps_out = irreps_out
         contractions = {}
-        for irrep_out in irreps_out:
+        for _, irrep_out in irreps_out:
             contractions[str(irrep_out)] = Contraction(
-                self.irreps_in, irrep_out, max_body_order, trainable_weights
+                irreps_in, irrep_out, max_body_order
             )
         self.contractions = contractions
 
     def __call__(self, A):
         Bs = []
         irrep_strs = []
-        for irrep in self.irreps_out:
+        for _, irrep in self.irreps_out:
             irrep_str = str(irrep)
             Bs.append(self.contractions[irrep_str](A))
             irrep_strs.append(irrep_str)
@@ -29,9 +28,10 @@ class SymmetricContraction(hk.Module):
 
 
 class Contraction(hk.Module):
-    def __init__(self, irreps_in, irrep_out, max_body_order, trainable_weights):
+    def __init__(self, irreps_in, irrep_out, max_body_order):
         super().__init__(f"Contraction_{irrep_out}")
         self.max_body_order = max_body_order
+        self.scalar_out = irrep_out.is_scalar()
         num_features = irreps_in.count("0e")
         coupling_irreps = e3nn.Irreps([irrep.ir for irrep in irreps_in])
         with jax.ensure_compile_time_eval():
@@ -44,6 +44,7 @@ class Contraction(hk.Module):
                         correlation=nu,
                     )[-1]
                 )
+
             self.U_matrices = U_matrices
         self.equation_init = "...ik,kc,bci -> bc..."
         self.equation_weighting = "...k,kc->c..."
@@ -57,8 +58,6 @@ class Contraction(hk.Module):
                     [num_params, num_features],
                     init=hk.initializers.VarianceScaling(),
                 )
-                if trainable_weights
-                else jnp.ones((num_params, num_features))
             )
         self.weights = weights
 
@@ -77,4 +76,4 @@ class Contraction(hk.Module):
             )
             c_tensor = c_tensor + B
             B = jnp.einsum(self.equation_contract, c_tensor, A)
-        return B
+        return B[..., None] if self.scalar_out else B

@@ -1,4 +1,5 @@
 import e3nn_jax as e3nn
+import haiku as hk
 import jax.numpy as jnp
 from jax import ops
 
@@ -12,22 +13,23 @@ class ACELayer(MessagePassingLayer):
         ilayer,
         shared,
         *,
-        node_feats_irreps="0y+1y",
         target_irreps="0y",
         max_body_order=2,
     ):
         super().__init__(ilayer, shared)
         self.embedding_dim
         node_feats_irreps = "+".join(
-            [f"{self.embedding_dim}x{y}" for y in node_feats_irreps.split("+")]
+            [f"{self.embedding_dim}x{y}y" for y in range(self.l_max + 1)]
         )
         node_feats_irreps = e3nn.Irreps(node_feats_irreps)
-        target_irreps = "+".join(
-            [f"{self.embedding_dim}x{y}" for y in target_irreps.split("+")]
-        )
         target_irreps = e3nn.Irreps(target_irreps)
         self.symmetrize = SymmetricContraction(
-            node_feats_irreps, target_irreps, max_body_order, trainable_weights=False
+            node_feats_irreps, target_irreps, max_body_order
+        )
+        self.mix_As = hk.get_parameter(
+            "mix_As",
+            [self.l_max + 1, self.embedding_dim, self.embedding_dim],
+            init=hk.initializers.VarianceScaling(),
         )
 
     def get_update_edges_fn(self):
@@ -39,7 +41,15 @@ class ACELayer(MessagePassingLayer):
             A = ops.segment_sum(
                 data=edges.features, segment_ids=edges.receivers, num_segments=n_nodes
             )
-            return A
+            As = jnp.split(A, [(l + 1) ** 2 for l in range(self.l_max)], axis=-1)
+            mixed_A = jnp.concatenate(
+                [
+                    jnp.einsum("kj,bji->bki", self.mix_As[l], A)
+                    for l, A in enumerate(As)
+                ],
+                axis=-1,
+            )
+            return mixed_A
 
         return aggregate_edges_for_nodes
 
@@ -57,14 +67,20 @@ class ACE(GraphNeuralNetwork):
         n_nodes,
         embedding_dim,
         cutoff,
-        layer_kwargs=None,
-        share_with_layers=None,
         *,
         radial_fn: str = "bessel",
         l_max: int = 0,
         **gnn_kwargs,
     ):
-        super().__init__(n_nodes, embedding_dim, cutoff, n_interactions=1, **gnn_kwargs)
+        share = {"l_max": l_max}
+        super().__init__(
+            n_nodes,
+            embedding_dim,
+            cutoff,
+            n_interactions=1,
+            **gnn_kwargs,
+            share_with_layers=share,
+        )
         self.edge_feature_factory = EdgeFeature(radial_fn, embedding_dim, cutoff, l_max)
 
     @classmethod
