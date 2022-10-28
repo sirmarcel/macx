@@ -7,14 +7,14 @@ from ..tools.cg import U_matrix_real
 
 
 class SymmetricContraction(hk.Module):
-    def __init__(self, irreps_in, irreps_out, max_body_order):
+    def __init__(self, irreps_in, irreps_out, max_body_order, trainable_weights=True):
         super().__init__()
         self.irreps_in = irreps_in
         self.irreps_out = irreps_out
         contractions = {}
         for irrep_out in irreps_out:
             contractions[str(irrep_out)] = Contraction(
-                self.irreps_in, irrep_out, max_body_order
+                self.irreps_in, irrep_out, max_body_order, trainable_weights
             )
         self.contractions = contractions
 
@@ -29,17 +29,17 @@ class SymmetricContraction(hk.Module):
 
 
 class Contraction(hk.Module):
-    def __init__(self, irreps_in, irrep_out, max_body_order):
+    def __init__(self, irreps_in, irrep_out, max_body_order, trainable_weights):
         super().__init__(f"Contraction_{irrep_out}")
-        self.num_features = irreps_in.count("0e")
-        self.coupling_irreps = e3nn.Irreps([irrep.ir for irrep in irreps_in])
         self.max_body_order = max_body_order
+        num_features = irreps_in.count("0e")
+        coupling_irreps = e3nn.Irreps([irrep.ir for irrep in irreps_in])
         with jax.ensure_compile_time_eval():
             U_matrices = []
             for nu in range(1, max_body_order + 1):
                 U_matrices.append(
                     U_matrix_real(
-                        irreps_in=self.coupling_irreps,
+                        irreps_in=coupling_irreps,
                         irreps_out=irrep_out,
                         correlation=nu,
                     )[-1]
@@ -54,9 +54,11 @@ class Contraction(hk.Module):
             weights.append(
                 hk.get_parameter(
                     f"weights_{i}",
-                    [num_params, self.num_features],
+                    [num_params, num_features],
                     init=hk.initializers.VarianceScaling(),
                 )
+                if trainable_weights
+                else jnp.ones((num_params, num_features))
             )
         self.weights = weights
 

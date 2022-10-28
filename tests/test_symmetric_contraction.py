@@ -1,15 +1,14 @@
-from mace.modules.symmetric_contraction import SymmetricContraction
 import e3nn_jax
-from e3nn import o3
-import torch
-from macx.models.symmetric_contraction import SymmetricContraction as SymContr_jax
-import jax.numpy as jnp
 import haiku as hk
 import jax
+import jax.numpy as jnp
+import torch
+from e3nn import o3
+from mace.modules.symmetric_contraction import SymmetricContraction
+from macx.models.symmetric_contraction import SymmetricContraction as SymContr_jax
 
 
-def test_symmetric_contraction_1():
-    rng = jax.random.PRNGKey(5243)
+def test_symmetric_contraction():
 
     irreps_in = o3.Irreps("7x0y+7x1y+7x2y")
     irreps_out = o3.Irreps("0y")
@@ -34,7 +33,6 @@ def test_symmetric_contraction_1():
     def sym_con_jax(A):
         return SymContr_jax(irreps_in_jax, irreps_out_jax, correlation)(A)
 
-    params = sym_con_jax.init(rng, A_jax)
     params = {
         "symmetric_contraction/~/Contraction_1x0e": {
             "weights_1": sym_con.contractions["1x0e"].weights["1"].detach(),
@@ -45,5 +43,5 @@ def test_symmetric_contraction_1():
     jax_B = sym_con_jax.apply(params, A_jax)
 
     assert jnp.isclose(
-        jnp.abs(jnp.array(torch_B.detach()) - jax_B).sum(), jnp.array(0.0), atol=1.0e-5
+        jnp.abs(jnp.array(torch_B.detach()) - jax_B).sum(), 0.0, atol=1.0e-5
     )
