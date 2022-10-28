@@ -6,10 +6,20 @@ import e3nn_jax as e3nn
 from e3nn_jax import sh
 from typing import Union
 from functools import partial
+from itertools import product
 
 from .radial_basis_function import BesselBasis
 
 Array = Union[np.ndarray, jnp.ndarray]
+
+
+def generate_irreps_string(l_max, n_rbf):
+    degrees = np.arange(l_max + 1)
+    s = []
+    for n, y, d in zip([n_rbf] * len(degrees), "y" * len(degrees), degrees):
+        s += [str(n) + "x" + str(d) + y]
+    s = "+".join(s)
+    return s
 
 
 class EdgeFeature(hk.Module):
@@ -18,6 +28,8 @@ class EdgeFeature(hk.Module):
     ):
 
         super().__init__()
+
+        self.irreps_out = generate_irreps_string(l_max=l_max, n_rbf=n_rbf)
 
         self.embed_fn = hk.Embed(vocab_size=z_max, embed_dim=1)
 
@@ -56,10 +68,10 @@ class EdgeFeature(hk.Module):
         rbf_ij = self.radial_fn(d_ij)  # shape: (P,n_rbf)
         sph_ij = self.spherical_fn(input=r_ij)  # shape: (P,m_tot)  m_tot = (l_max+1)^2
         A_ij = (
-            rbf_ij[:, :, None] * sph_ij[:, None, :] * x_i * x_j
-        )  # shape: (P,n_rbf,m_tot)
+            rbf_ij[:, None, :] * sph_ij[:, :, None] * x_i * x_j
+        )  # shape: (P,m_tot,n_rbf)
 
-        return A_ij
+        return e3nn.IrrepsArray(self.irreps_out, A_ij.reshape(A_ij.shape[0], -1))
 
 
 # implemented elsewhere
