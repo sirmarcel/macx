@@ -27,7 +27,7 @@ class ACELayer(MessagePassingLayer):
         )
         target_irreps = e3nn.Irreps(target_irreps)
         self.symmetrize = SymmetricContraction(
-            node_feats_irreps, target_irreps, max_body_order
+            node_feats_irreps, target_irreps, max_body_order, trainable_weights=False
         )
 
     def get_update_edges_fn(self):
