@@ -3,7 +3,9 @@ import jax.numpy as jnp
 from opt_einsum import contract
 
 
-def contract_with_irrep_array(instructions, *inputs: jnp.ndarray, irrep_array: e3nn.IrrepsArray):
+def contract_with_irrep_array(
+    instructions, *inputs: jnp.ndarray, irrep_array: e3nn.IrrepsArray
+):
     if not isinstance(irrep_array, e3nn.IrrepsArray):
         raise TypeError
     for inp in inputs:
