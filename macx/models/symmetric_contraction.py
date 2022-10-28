@@ -44,7 +44,6 @@ class Contraction(hk.Module):
                         correlation=nu,
                     )[-1]
                 )
-            jax.debug.print("Computing U matrices")
             self.U_matrices = U_matrices
         self.equation_init = "...ik,kc,bci -> bc..."
         self.equation_weighting = "...k,kc->c..."
