@@ -2,7 +2,6 @@ import e3nn_jax as e3nn
 import haiku as hk
 import jax
 import jax.numpy as jnp
-from opt_einsum import contract
 
 from ..tools.cg import U_matrix_real
 
@@ -45,6 +44,7 @@ class Contraction(hk.Module):
                         correlation=nu,
                     )[-1]
                 )
+            jax.debug.print("Computing U matrices")
             self.U_matrices = U_matrices
         self.equation_init = "...ik,kc,bci -> bc..."
         self.equation_weighting = "...k,kc->c..."
@@ -62,18 +62,18 @@ class Contraction(hk.Module):
         self.weights = weights
 
     def __call__(self, A):
-        B = contract(
+        B = jnp.einsum(
             self.equation_init,
             self.U_matrices[self.max_body_order - 1],
             self.weights[self.max_body_order - 1],
             A,
         )
         for corr in range(self.max_body_order - 1, 0, -1):
-            c_tensor = contract(
+            c_tensor = jnp.einsum(
                 self.equation_weighting,
                 self.U_matrices[corr - 1],
                 self.weights[corr - 1],
             )
             c_tensor = c_tensor + B
-            B = contract(self.equation_contract, c_tensor, A)
+            B = jnp.einsum(self.equation_contract, c_tensor, A)
         return B

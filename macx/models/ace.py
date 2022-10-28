@@ -79,7 +79,6 @@ class ACE(GraphNeuralNetwork):
 
     def initial_embeddings(self):
         r"""Return the initial embeddings as a :class:`GraphNodes` instance."""
-        #  return e3nn.IrrepsArray("1x0e", jnp.ones((self.n_nodes, 1)))
         return jnp.ones((self.n_nodes, 1))
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
