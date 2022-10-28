@@ -1,9 +1,10 @@
-import mace
-from e3nn_jax import Irreps, Irrep
-from macx.tools import cg
-from mace.tools import cg as mace_cg
-from e3nn import o3
 import jax.numpy as jnp
+import mace
+from e3nn import o3
+from e3nn_jax import Irrep, Irreps
+from mace.tools import cg as mace_cg
+
+from macx.tools import cg
 
 
 def U_matrix_real(  # easymode

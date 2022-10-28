@@ -3,7 +3,7 @@ from functools import partial
 import haiku as hk
 import jax.numpy as jnp
 
-from .graph import Graph, GraphUpdate
+from .graph import Graph, GraphEdgeBuilder, GraphUpdate
 
 
 class MessagePassingLayer(hk.Module):
@@ -77,21 +77,18 @@ class GraphNeuralNetwork(hk.Module):
     Base class for all graph neural networks on molecules.
 
     Args:
-        mol (:class:`deepqmc.jax.Molecule`): the molecule on which the GNN
-            is defined
+        n_nodes (int): the number of nodes in the graph
         embedding_dim (int): the size of the electron embeddings to be returned.
         cutoff (float): cutoff distance above which graph edges are discarded.
         n_interactions (int): the number of interaction layers in the GNN.
         layer_kwargs (dict): optional, kwargs to be passed to the layers.
-        ghost_coords (float, [N, 3]): optional, coordinates of ghost atoms.
-            These will be included as nuclear nodes in the graph. Useful for
-            breaking undesired spatial symmetries.
         share_with_layers (dict): optional, attribute names and values to share
             with the interaction layers.
     """
 
     def __init__(
         self,
+        n_nodes,
         embedding_dim,
         cutoff,
         n_interactions,
@@ -99,6 +96,7 @@ class GraphNeuralNetwork(hk.Module):
         share_with_layers=None,
     ):
         super().__init__()
+        self.n_nodes = n_nodes
         self.cutoff = cutoff
         share_with_layers = share_with_layers or {}
         share_with_layers.setdefault("embedding_dim", embedding_dim)
@@ -113,7 +111,6 @@ class GraphNeuralNetwork(hk.Module):
             )
             for i in range(n_interactions)
         ]
-        self.n_up, self.n_down = n_up, n_down
 
     def init_state(self, shape, dtype):
         r"""Initialize the haiku state that communicates the sizes of edge lists."""
@@ -143,13 +140,15 @@ class GraphNeuralNetwork(hk.Module):
 
     def edge_factory(self, r, occupancies):
         r"""Return a function that builds all the edges used in the GNN."""
+        mask_val = r.shape[0] + 1
         edge_factory = GraphEdgeBuilder(
-            self.cutoff[typ],
-            self.offsets[typ],
-            self.mask_vals[typ],
+            self.cutoff,
+            True,
+            (0, 0),
+            (mask_val, mask_val),
             self.edge_feature_callback,
         )
-        return edge_factory(r, occupancies)
+        return edge_factory(r, r, occupancies)
 
     @classmethod
     @property
@@ -168,6 +167,8 @@ class GraphNeuralNetwork(hk.Module):
             float, (:math:`N_\text{elec}`, :data:`embedding_dim`):
             the final embeddings of the electrons.
         """
+        if r.shape[0] != self.n_nodes:
+            raise ValueError
         occupancies = hk.get_state(
             "occupancies",
             shape=1,
