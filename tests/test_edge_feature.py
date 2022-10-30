@@ -29,4 +29,4 @@ def test_fire():
 
     out = edge_feature_fn.apply(params, **inputs)
 
-    assert out.shape == (len(idx_i), int(n_rbf * (l_max + 1) ** 2))
+    assert out.shape == (len(idx_i), n_rbf, int((l_max + 1) ** 2))
