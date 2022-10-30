@@ -34,13 +34,13 @@ def test_symmetric_contraction():
         return SymContr_jax(irreps_in_jax, irreps_out_jax, correlation)(A)
 
     params = {
-        "symmetric_contraction/~/Contraction_1x0e": {
-            "weights_1": sym_con.contractions["1x0e"].weights["1"].detach(),
-            "weights_2": sym_con.contractions["1x0e"].weights["2"].detach(),
+        "symmetric_contraction/~/Contraction_0e": {
+            "weights_1": sym_con.contractions["1x0e"].weights["1"].detach().numpy(),
+            "weights_2": sym_con.contractions["1x0e"].weights["2"].detach().numpy(),
         }
     }
     params = jax.tree_util.tree_map(lambda x: jnp.array(x), params)
-    jax_B = sym_con_jax.apply(params, A_jax)
+    jax_B = sym_con_jax.apply(params, A_jax).squeeze()
 
     assert jnp.isclose(
         jnp.abs(jnp.array(torch_B.detach()) - jax_B).sum(), 0.0, atol=1.0e-5
