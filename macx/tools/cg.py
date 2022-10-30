@@ -59,22 +59,24 @@ def _wigner_nj(
                 if filter_ir_mid is not None and ir_out not in filter_ir_mid:
                     continue
 
-                C = e3nn_jax.clebsch_gordan(ir_out.l, ir_left.l, ir.l) # TODO dtype ?
+                C = e3nn_jax.clebsch_gordan(ir_out.l, ir_left.l, ir.l)  # TODO dtype ?
                 if normalization == "component":
-                    C *= ir_out.dim ** 0.5
+                    C *= ir_out.dim**0.5
                 if normalization == "norm":
-                    C *= ir_left.dim ** 0.5 * ir.dim ** 0.5
+                    C *= ir_left.dim**0.5 * ir.dim**0.5
 
-                C = np.einsum("jk,ijl->ikl", C_left.reshape(C_left.shape[0],-1), C)
+                C = np.einsum("jk,ijl->ikl", C_left.reshape(C_left.shape[0], -1), C)
                 C = C.reshape(
                     ir_out.dim, *(irreps.dim for irreps in irrepss_left), ir.dim
                 )
                 for u in range(mul):
-                    E = np.zeros((
-                        ir_out.dim,
-                        *(irreps.dim for irreps in irrepss_left),
-                        irreps_right.dim, # TODO dtype?
-                    ))
+                    E = np.zeros(
+                        (
+                            ir_out.dim,
+                            *(irreps.dim for irreps in irrepss_left),
+                            irreps_right.dim,  # TODO dtype?
+                        )
+                    )
                     sl = slice(i + u * ir.dim, i + (u + 1) * ir.dim)
                     E[..., sl] = C
                     ret += [
@@ -91,7 +93,7 @@ def _wigner_nj(
                         )
                     ]
             i += mul * ir.dim
-    return sorted(ret, key=lambda x: str(x[:2]))# TODO is this problem?
+    return sorted(ret, key=lambda x: str(x[:2]))  # TODO is this problem?
 
 
 def U_matrix_real(
@@ -129,7 +131,9 @@ def U_matrix_real(
             if stack is None:
                 stack = base_o3.squeeze()[..., np.newaxis]
             else:
-                stack = np.concatenate((stack, base_o3.squeeze()[..., np.newaxis]), axis=-1)
+                stack = np.concatenate(
+                    (stack, base_o3.squeeze()[..., np.newaxis]), axis=-1
+                )
             last_ir = current_ir
         elif ir in irreps_out and ir != current_ir:
             if len(stack) != 0:
@@ -140,4 +144,3 @@ def U_matrix_real(
             current_ir = ir
     out += [last_ir, jnp.array(stack)]
     return out
-
