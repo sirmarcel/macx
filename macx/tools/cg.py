@@ -65,7 +65,7 @@ def _wigner_nj(
                 if normalization == "norm":
                     C *= ir_left.dim ** 0.5 * ir.dim ** 0.5
 
-                C = jnp.einsum("jk,ijl->ikl", C_left.reshape(C_left.shape[0],-1), C)
+                C = np.einsum("jk,ijl->ikl", C_left.reshape(C_left.shape[0],-1), C)
                 C = C.reshape(
                     ir_out.dim, *(irreps.dim for irreps in irrepss_left), ir.dim
                 )
@@ -91,7 +91,7 @@ def _wigner_nj(
                         )
                     ]
             i += mul * ir.dim
-    return sorted(ret, key=lambda x: x[0])# TODO is this problem?
+    return sorted(ret, key=lambda x: str(x[:2]))# TODO is this problem?
 
 
 def U_matrix_real(
