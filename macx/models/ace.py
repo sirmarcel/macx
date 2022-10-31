@@ -15,6 +15,7 @@ class ACELayer(MessagePassingLayer):
         *,
         target_irreps="0y",
         max_body_order=2,
+        num_elements=None,
     ):
         super().__init__(ilayer, shared)
         self.embedding_dim
@@ -24,7 +25,7 @@ class ACELayer(MessagePassingLayer):
         node_feats_irreps = e3nn.Irreps(node_feats_irreps)
         target_irreps = e3nn.Irreps(target_irreps)
         self.symmetrize = SymmetricContraction(
-            node_feats_irreps, target_irreps, max_body_order
+            node_feats_irreps, target_irreps, max_body_order, num_elements
         )
         self.mix_As = hk.get_parameter(
             "mix_As",
@@ -37,7 +38,7 @@ class ACELayer(MessagePassingLayer):
 
     def get_aggregate_edges_for_nodes_fn(self):
         def aggregate_edges_for_nodes(nodes, edges):
-            n_nodes = nodes.shape[-2]
+            n_nodes = nodes["initial_embeddings"].shape[-2]
             A = ops.segment_sum(
                 data=edges.features, segment_ids=edges.receivers, num_segments=n_nodes
             )
@@ -55,7 +56,7 @@ class ACELayer(MessagePassingLayer):
 
     def get_update_nodes_fn(self):
         def update_nodes(nodes, A):
-            B = self.symmetrize(A)
+            B = self.symmetrize(A, nodes["node_types"])
             return B
 
         return update_nodes
@@ -93,9 +94,12 @@ class ACE(GraphNeuralNetwork):
         zeros = jnp.zeros(shape, dtype)
         return zeros
 
-    def initial_embeddings(self):
+    def node_factory(self, node_attrs):
         r"""Return the initial embeddings as a :class:`GraphNodes` instance."""
-        return jnp.ones((self.n_nodes, 1))
+        return {
+            "initial_embeddings": jnp.ones((self.n_nodes, 1)),
+            "node_types": node_attrs,
+        }
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]

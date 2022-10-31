@@ -116,7 +116,7 @@ class GraphNeuralNetwork(hk.Module):
         r"""Initialize the haiku state that communicates the sizes of edge lists."""
         raise NotImplementedError
 
-    def initial_embeddings(self):
+    def node_factory(self, node_attrs):
         r"""Return the initial embeddings as a :class:`GraphNodes` instance."""
         raise NotImplementedError
 
@@ -156,7 +156,7 @@ class GraphNeuralNetwork(hk.Module):
         r"""Return the class of the interaction layer to be used."""
         return MessagePassingLayer
 
-    def __call__(self, r):
+    def __call__(self, r, node_attrs=None):
         r"""
         Execute the graph neural network.
 
@@ -177,7 +177,7 @@ class GraphNeuralNetwork(hk.Module):
         )
         graph_edges, occupancies = self.edge_factory(r, occupancies)
         hk.set_state("occupancies", occupancies)
-        graph_nodes = self.initial_embeddings()
+        graph_nodes = self.node_factory(node_attrs)
         graph = Graph(
             graph_nodes,
             graph_edges,
