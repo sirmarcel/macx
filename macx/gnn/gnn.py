@@ -78,7 +78,7 @@ class GraphNeuralNetwork(hk.Module):
 
     Args:
         n_nodes (int): the number of nodes in the graph
-        embedding_dim (int): the size of the electron embeddings to be returned.
+        embedding_dim (int): the size of the embeddings to be returned.
         cutoff (float): cutoff distance above which graph edges are discarded.
         n_interactions (int): the number of interaction layers in the GNN.
         layer_kwargs (dict): optional, kwargs to be passed to the layers.
@@ -161,11 +161,11 @@ class GraphNeuralNetwork(hk.Module):
         Execute the graph neural network.
 
         Args:
-            r (float, (:math:`N_\text{elec}`, 3)): electron coordinates.
+            r (float, (:math:`N_\text{nodes}`, 3)): coordinates of the graph nodes.
 
         Returns:
-            float, (:math:`N_\text{elec}`, :data:`embedding_dim`):
-            the final embeddings of the electrons.
+            float, (:math:`N_\text{nodes}`, :data:`embedding_dim`):
+            the final node embeddings.
         """
         if r.shape[0] != self.n_nodes:
             raise ValueError
