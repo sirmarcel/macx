@@ -99,6 +99,7 @@ class GraphNeuralNetwork(hk.Module):
         self.n_nodes = n_nodes
         self.cutoff = cutoff
         share_with_layers = share_with_layers or {}
+        share_with_layers.setdefault("n_nodes", n_nodes)
         share_with_layers.setdefault("embedding_dim", embedding_dim)
         for k, v in share_with_layers.items():
             setattr(self, k, v)

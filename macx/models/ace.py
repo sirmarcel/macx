@@ -1,9 +1,13 @@
+from functools import partial
+from typing import Optional, Sequence
+
 import e3nn_jax as e3nn
 import haiku as hk
 import jax.numpy as jnp
 from jax import ops
 
-from ..gnn import EdgeFeature, GraphNeuralNetwork, MessagePassingLayer
+from ..gnn import GraphNeuralNetwork, MessagePassingLayer
+from ..gnn.edge_features import EdgeFeatures
 from .symmetric_contraction import SymmetricContraction
 
 
@@ -13,44 +17,52 @@ class ACELayer(MessagePassingLayer):
         ilayer,
         shared,
         *,
-        target_irreps="0y",
-        max_body_order=2,
-        num_elements=None,
+        max_body_order: int,
+        embedding_irreps: Sequence[e3nn.Irrep],
+        mix_atomic_basis: bool = True,
+        num_elements: Optional[int] = None,
     ):
         super().__init__(ilayer, shared)
-        self.embedding_dim
-        node_feats_irreps = "+".join(
-            [f"{self.embedding_dim}x{y}y" for y in range(self.l_max + 1)]
-        )
-        node_feats_irreps = e3nn.Irreps(node_feats_irreps)
-        target_irreps = e3nn.Irreps(target_irreps)
+        self.mix_atomic_basis = mix_atomic_basis
         self.symmetrize = SymmetricContraction(
-            node_feats_irreps, target_irreps, max_body_order, num_elements
+            embedding_irreps,
+            self.edge_feat_irreps,
+            self.embedding_dim,
+            max_body_order,
+            num_elements,
         )
-        self.mix_As = hk.get_parameter(
-            "mix_As",
-            [self.l_max + 1, self.embedding_dim, self.embedding_dim],
-            init=hk.initializers.VarianceScaling(),
-        )
+        if mix_atomic_basis:
+            self.atomic_basis_weights = hk.get_parameter(
+                "atomic_basis_weights",
+                [len(self.edge_feat_irreps), self.embedding_dim, self.embedding_dim],
+                init=hk.initializers.VarianceScaling(),
+            )
+            acc = 0
+            self.split_idxs = []
+            for ir in self.edge_feat_irreps[:-1]:
+                acc += 2 * ir.l + 1
+                self.split_idxs.append(acc)
 
     def get_update_edges_fn(self):
         return None
 
     def get_aggregate_edges_for_nodes_fn(self):
         def aggregate_edges_for_nodes(nodes, edges):
-            n_nodes = nodes["initial_embeddings"].shape[-2]
             A = ops.segment_sum(
-                data=edges.features, segment_ids=edges.receivers, num_segments=n_nodes
+                data=edges.features,
+                segment_ids=edges.receivers,
+                num_segments=self.n_nodes,
             )
-            As = jnp.split(A, [(l + 1) ** 2 for l in range(self.l_max)], axis=-1)
-            mixed_A = jnp.concatenate(
-                [
-                    jnp.einsum("kj,bji->bki", self.mix_As[l], A)
-                    for l, A in enumerate(As)
-                ],
-                axis=-1,
-            )
-            return mixed_A
+            if self.mix_atomic_basis:
+                As = jnp.split(A, self.split_idxs, axis=-1)
+                A = jnp.concatenate(
+                    [
+                        jnp.einsum("kj,bji->bki", weight, A)
+                        for weight, A in zip(self.atomic_basis_weights, As)
+                    ],
+                    axis=-1,
+                )
+            return A
 
         return aggregate_edges_for_nodes
 
@@ -65,24 +77,36 @@ class ACELayer(MessagePassingLayer):
 class ACE(GraphNeuralNetwork):
     def __init__(
         self,
-        n_nodes,
-        embedding_dim,
-        cutoff,
+        n_nodes: int,
+        embedding_dim: int,
+        cutoff: float,
+        max_body_order: int,
+        embedding_irreps: Sequence[e3nn.Irrep],
+        edge_feat_irreps: Sequence[e3nn.Irrep],
         *,
-        radial_fn: str = "bessel",
-        l_max: int = 0,
-        **gnn_kwargs,
+        edge_feat_factory=None,
+        edge_feat_kwargs=None,
+        layer_kwargs=None,
     ):
-        share = {"l_max": l_max}
+        layer_kwargs = layer_kwargs or {}
+        layer_kwargs.setdefault("max_body_order", max_body_order)
+        layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
+        share = {
+            "edge_feat_irreps": edge_feat_irreps,
+        }
         super().__init__(
             n_nodes,
             embedding_dim,
             cutoff,
-            n_interactions=1,
-            **gnn_kwargs,
+            1,
+            layer_kwargs,
             share_with_layers=share,
         )
-        self.edge_feature_factory = EdgeFeature(radial_fn, embedding_dim, cutoff, l_max)
+        if edge_feat_factory is None:
+            edge_feat_factory = EdgeFeatures
+        self.edge_features = edge_feat_factory(
+            embedding_dim, cutoff, edge_feat_irreps, **(edge_feat_kwargs or {})
+        )
 
     @classmethod
     @property
@@ -103,8 +127,6 @@ class ACE(GraphNeuralNetwork):
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]
-        features = self.edge_feature_factory(
-            jnp.ones(1), sender_idx, receiver_idx, r_ij
-        )
+        features = self.edge_features(r_ij)
 
         return features

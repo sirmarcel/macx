@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from typing import Optional
+
 import e3nn_jax as e3nn
 import haiku as hk
 import jax
@@ -7,44 +10,108 @@ from ..tools.cg import U_matrix_real
 
 
 class SymmetricContraction(hk.Module):
-    def __init__(self, irreps_in, irreps_out, max_body_order, num_elements):
+    r"""
+    Create higher body-order tensors transformig according to some irreps.
+
+    This class is a wrapper of
+    :class:`~macx.tools.symmetric_contraction.ContractionToIrrep` to create
+    multiple concatenated higher body-order tensors each transforming according
+    to different irreps. For more details see the documentation of
+    :class:`~macx.tools.symmetric_contraction.ContractionToIrrep`.
+
+    The output array has shape
+    [:math:`N_\text{batch}`, :math:`N_\text{feature}, :math:`\sum_{i}(2 l_i + 1)`],
+    where :math:`i` runs over :data:`irreps_in`.
+
+    Args:
+        irreps_out (Sequence[e3nn_jax.Irrep]): the irreps of the concatenated output
+            tensors.
+        irreps_in (Sequence[e3nn_jax.Irrep]): the irreps of the concatenated input
+            tensors.
+        max_body_order (int): output tensors up to body-order :data:`max_body_order`
+            are calculated and their sum is returned.
+    """
+
+    def __init__(
+        self,
+        irreps_out: Sequence[e3nn.Irrep],
+        irreps_in: Sequence[e3nn.Irrep],
+        n_feature: int,
+        max_body_order: int,
+        num_elements: Optional[int] = None,
+    ):
         super().__init__()
         self.irreps_out = irreps_out
         contractions = {}
-        for _, irrep_out in irreps_out:
-            contractions[str(irrep_out)] = Contraction(
-                irreps_in, irrep_out, max_body_order, num_elements
+        for irrep_out in irreps_out:
+            contractions[str(irrep_out)] = ContractionToIrrep(
+                irrep_out, irreps_in, n_feature, max_body_order, num_elements
             )
         self.contractions = contractions
 
     def __call__(self, A, node_attrs=None):
         Bs = []
-        irrep_strs = []
-        for _, irrep in self.irreps_out:
-            irrep_str = str(irrep)
-            Bs.append(self.contractions[irrep_str](A, node_attrs))
-            irrep_strs.append(irrep_str)
+        for irrep in self.irreps_out:
+            Bs.append(self.contractions[str(irrep)](A, node_attrs))
         return jnp.concatenate(Bs, axis=-1)
 
 
-class Contraction(hk.Module):
-    def __init__(self, irreps_in, irrep_out, max_body_order, num_elements):
-        super().__init__(f"Contraction_{irrep_out}")
+class ContractionToIrrep(hk.Module):
+    r"""
+    Create higher body-order tensors transforming according to some irrep.
+
+    Taking as input concatenated 2-body tensors that transform according to
+    :data:`irreps_in`, it calculates their tensor products using the generalized
+    Clebsch--Gordan coefficients, to return a sum of higher body-order tensors
+    that transforms as :data:`irrep_out`.
+
+    Input array must have the shape
+    [:math:`N_\text{batch}`, :math:`N_\text{feature}, :math:`\sum_{i}(2 l_i + 1)`],
+    where :math:`i`, runs over :data:`irreps_in`. The output array has the shape
+    [:math:`N_\text{batch}`, :math:`N_\text{feature}`, :math:`2 l_\text{out} + 1`].
+
+    Args:
+        irrep_out (e3nn_jax.Irrep): the irrep of the output tensor
+        irreps_in (Sequence[e3nn_jax.Irrep]): the irreps of the concatenated input
+            tensors.
+        n_feature (int): the number of features of the input tensors.
+        max_body_order (int): output tensors up to body-order :data:`max_body_order`
+            are calculated and their sum is returned.
+    """
+
+    def __init__(
+        self,
+        irrep_out: e3nn.Irrep,
+        irreps_in: Sequence[e3nn.Irrep],
+        n_feature: int,
+        max_body_order: int,
+        num_elements: Optional[int] = None,
+    ):
+        super().__init__(f"contraction_to_irrep_{irrep_out}")
+        if max_body_order < 2:
+            raise ValueError(
+                "Input has body-order 2, therefore max_body_order "
+                f"has to be at least 2, got {max_body_order}"
+            )
+        self.correlation = max_body_order - 2
         self.element_dependent = num_elements is not None
-        self.max_body_order = max_body_order
+        # U matrix for scalar irrep_out is missing its first dimension (size 1),
+        # we need to add it manually:
         self.scalar_out = irrep_out.is_scalar()
-        num_features = irreps_in.count("0e")
-        coupling_irreps = e3nn.Irreps([irrep.ir for irrep in irreps_in])
         with jax.ensure_compile_time_eval():
             U_matrices = []
-            for nu in range(1, max_body_order + 1):
-                U_matrices.append(
-                    U_matrix_real(
-                        irreps_in=coupling_irreps,
-                        irreps_out=irrep_out,
-                        correlation=nu,
-                    )[-1]
-                )
+            for nu in range(1, max_body_order):
+                U = U_matrix_real(
+                    irreps_in=e3nn.Irreps(irreps_in),
+                    irreps_out=irrep_out,
+                    correlation=nu,
+                )[-1]
+                if irreps_in == [e3nn.Irrep("0e")]:
+                    # U matrix for single scalar input is missing all but its
+                    # last dimension (all size 1), we need to add it manually
+                    for _ in range(nu):
+                        U = U[None]
+                U_matrices.append(U)
 
             self.U_matrices = U_matrices
 
@@ -56,16 +123,16 @@ class Contraction(hk.Module):
             self.equation_weighting = "...k,kc->c..."
         self.equation_contract = "bc...i,bci->bc..."
         weights = []
-        for i in range(1, max_body_order + 1):
-            num_params = self.U_matrices[i - 1].shape[-1]
-            weight_shape = ()
+        for nu in range(1, max_body_order):
+            # number of ways irrep_out can be created from irreps_in at body order nu:
+            n_coupling = self.U_matrices[nu - 1].shape[-1]
             weights.append(
                 hk.get_parameter(
-                    f"weights_{i}",
+                    f"coupling_weights_{nu}",
                     (
-                        [num_elements, num_params, num_features]
+                        [num_elements, n_coupling, n_feature]
                         if self.element_dependent
-                        else [num_params, num_features]
+                        else [n_coupling, n_feature]
                     ),
                     init=hk.initializers.VarianceScaling(),
                 )
@@ -75,15 +142,15 @@ class Contraction(hk.Module):
     def __call__(self, A, node_attrs):
         B = jnp.einsum(
             self.equation_init,
-            self.U_matrices[self.max_body_order - 1],
-            self.weights[self.max_body_order - 1],
+            self.U_matrices[self.correlation],
+            self.weights[self.correlation],
             *((A,) if node_attrs is None else (A, node_attrs)),
         )
-        for corr in range(self.max_body_order - 1, 0, -1):
+        for corr in reversed(range(self.correlation)):
             c_tensor = jnp.einsum(
                 self.equation_weighting,
-                self.U_matrices[corr - 1],
-                self.weights[corr - 1],
+                self.U_matrices[corr],
+                self.weights[corr],
                 *(() if node_attrs is None else (node_attrs,)),
             )
             c_tensor = c_tensor + B
