@@ -39,9 +39,7 @@ def test_symmetric_contraction():
             "weights_2": sym_con.contractions["1x0e"].weights["2"].detach().numpy(),
         }
     }
-    params = jax.tree_util.tree_map(lambda x: jnp.array(x), params)
+    params = jax.tree_util.tree_map(jnp.array, params)
     jax_B = sym_con_jax.apply(params, A_jax).squeeze()
 
-    assert jnp.isclose(
-        jnp.abs(jnp.array(torch_B.detach()) - jax_B).sum(), 0.0, atol=1.0e-5
-    )
+    assert jnp.allclose(jnp.array(torch_B.detach()), jax_B, atol=1e-6)
