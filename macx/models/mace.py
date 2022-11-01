@@ -68,14 +68,43 @@ class MACELayer(ACELayer):
         return update_nodes
 
 
-class MACE(ACE):
+class MACE(GraphNeuralNetwork):
     def __init__(
         self,
-        *ace_args,
-        initial_embedding: bool = True,
-        **ace_kwargs,
+        n_nodes: int,
+        embedding_dim: int,
+        cutoff: float,
+        n_interactions: int,
+        max_body_order: int,
+        embedding_irreps: Sequence[e3nn.Irrep],
+        edge_feat_irreps: Sequence[e3nn.Irrep],
+        node_types: Sequence[int],
+        *,
+        edge_feat_factory=None,
+        edge_feat_kwargs=None,
+        layer_kwargs=None,
     ):
-        super().__init__(*ace_args, **ace_kwargs)
+        layer_kwargs = layer_kwargs or {}
+        layer_kwargs.setdefault("max_body_order", max_body_order)
+        layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
+        share = {
+            "edge_feat_irreps": edge_feat_irreps,
+            "n_node_type": len(elements),
+        }
+        super().__init__(
+            n_nodes,
+            embedding_dim,
+            cutoff,
+            n_interactions,
+            layer_kwargs,
+            share_with_layers=share,
+        )
+        if edge_feat_factory is None:
+            edge_feat_factory = EdgeFeatures
+        self.edge_features = edge_feat_factory(
+            embedding_dim, cutoff, edge_feat_irreps, **(edge_feat_kwargs or {})
+        )
+        self.node_types = node_types
         self.initial_embedding = (
             hk.Embed(self.n_node_type, self.embedding_dim)
             if initial_embedding
