@@ -17,4 +17,5 @@ class ArrayLinear(Linear):
         *leading_dims, embedding_dim, irreps_dim = x.shape
         x = IrrepsArray(self.mult_irreps_in, x.reshape(*leading_dims, 1, -1))
         out = super().__call__(x)
-        return out.array.reshape(*leading_dims, self.channel_out, embedding_dim, -1)
+        out = out.array.reshape(*leading_dims, self.channel_out, embedding_dim, -1)
+        return jnp.squeeze(out, axis=-3) # remove singular channel dimension

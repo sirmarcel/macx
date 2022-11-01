@@ -5,37 +5,30 @@ from jax import ops
 from ..gnn import EdgeFeature, GraphNeuralNetwork
 from ..tools.e3nn_ext import ArrayLinear
 from .ace import ACELayer
-from .symmetric_contraction import SymmetricContraction
+from .symmetric_contraction import WeightedTensorProduct
 
 
 class MACELayer(ACELayer):
     def __init__(
         self,
         *ace_args,
-        mix_prev_embed: bool = True,
         **ace_kwargs,
     ):
         super().__init__(*ace_args, **ace_kwargs)
-        self.mix_prev_embed = mix_prev_embed
-        if mix_prev_embed:
-            self.prev_embed_weights = hk.get_parameter(
-                "prev_embed_weights",
-                [len(self.embedding_irreps), self.embedding_dim, self.embedding_dim],
-                init=hk.initializers.VarianceScaling(),
-            )
-            acc = 0
-            self.embed_split_idxs = []
-            for ir in self.embedding_irreps[:-1]:
-                acc += 2 * ir.l + 1
-                self.embed_split_idxs.append(acc)
+        emb_irreps = [e3nn.Irrep("0e")] if self.first_layer else self.embedding_irreps
+        self.prev_embed_mixing_layer = ArrayLinear(emb_irreps, emb_irreps, self.embedding_dim)
         self.message_mixing_layer = ArrayLinear(
-            embedding_irreps, embedding_irreps, self.embedding_dim
+            self.embedding_irreps, self.embedding_irreps, self.embedding_dim
         )
-        self.embedding_mixing_layer = ArrayLinear(
-            embedding_irreps,
-            embedding_irreps,
+        self.embed_mixing_layer = ArrayLinear(
+            self.embedding_irreps,
+            self.embedding_irreps,
             self.embedding_dim,
             channel_out=self.n_node_type,
+        self.wtp = WeightedTensorProduct(
+            self.edge_feat_irreps,
+            emb_irreps,
+            self.edge_feat_irreps,
         )
 
     def get_update_edges_fn(self):
@@ -45,24 +38,8 @@ class MACELayer(ACELayer):
         ace_aggregate = super().get_aggregate_edges_for_nodes_fn()
 
         def aggregate_edges_for_nodes(nodes, edges):
-            prev_embed = nodes["embedding"]
-            if self.mix_prev_embed:
-                prev_embeds = jnp.split(prev_embed, self.embed_split_idxs, axis=-1)
-                prev_embed = jnp.concatenate(
-                    [
-                        jnp.einsum("kj,bji->bki", weight, pe)
-                        for weight, pe in zip(self.prev_embed_weights, prev_embeds)
-                    ],
-                    axis=-1,
-                )
-            e3nn.tensor_product(
-                e3nn.IrrepsArray(self.edge_feat_irreps, A_unsymm),
-                e3nn.IrrepsArray(
-                    e3nn.Irrep("0y") if self.first_layer else self.embedding_irreps,
-                    prev_embed[edges.senders],
-                ),
-                filter_ir_out=self.embedding_irreps,
-            )
+            embedding = self.embed_linear(nodes["embedding"])
+            updated_edges = self.wtp(edges.features, embedding)
             return ace_aggregate(nodes, updated_edges)
 
         return aggregate_edges_for_nodes
@@ -74,9 +51,9 @@ class MACELayer(ACELayer):
             messages = ace_update_nodes(nodes, A)
             node_embeddings = jnp.einsum(
                 "ijkl,ij->ikl",
-                self.node_mixing_layer(nodes["embedding"]),
+                self.embed_mixing_layer(nodes["embedding"]),
                 nodes["node_type"],
-            ) + jnp.squeeze(self.message_mixing_layer(messages), axis=-3)
+            ) + self.message_mixing_layer(messages)
             return node_embeddings
 
         return update_nodes

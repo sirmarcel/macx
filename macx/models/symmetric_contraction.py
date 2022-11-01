@@ -9,6 +9,62 @@ import jax.numpy as jnp
 from ..tools.cg import U_matrix_real
 
 
+class FunctionalWeightedTensorProduct:
+    def __init__(
+        self,
+        irreps_x: Sequence[e3nn.Irrep],
+        irreps_y: Sequence[e3nn.Irrep],
+        irreps_out: Sequence[e3nn.Irrep],
+    ):
+        self.irreps_x = irreps_x
+        self.irreps_y = irreps_y
+        self.irreps_out = irreps_out
+        self.ir_tp_out = e3nn.tensor_product(e3nn.Irreps(irreps_x), e3nn.Irreps(irreps_y), filter_ir_out=irreps_out).simplify()
+        self.weighted_sum = e3nn.FunctionalLinear(self.ir_tp_out, irreps_out)
+
+    @property
+    def weight_shapes(self):
+        shapes = []
+        for mul_in, ir_in in self.ir_tp_out:
+            for mul_out, ir_out in self.irreps_out:
+                if ir_in == ir_out:
+                    shapes.append((mul_in, mul_out))
+        return shapes
+
+    def __call__(self, w, x, y):
+        ia_x = e3nn.IrrepsArray(self.irreps_x, x)
+        ia_y = e3nn.IrrepsArray(self.irreps_y, y)
+        ia_out = e3nn.tensor_product(ia_x, ia_y, filter_ir_out=self.irreps_out)
+
+        weighted_sum = lambda x: self.weighted_sum(w, x)
+        for _ in range(ia_out.ndim - 1):
+            weighted_sum = jax.vmap(weighted_sum)
+
+        weighted_ia_out = weighted_sum(ia_out)
+        return weighted_ia_out.array
+
+
+class WeightedTensorProduct(hk.Module):
+    def __init__(
+        self,
+        irreps_x: Sequence[e3nn.Irrep],
+        irreps_y: Sequence[e3nn.Irrep],
+        irreps_out: Sequence[e3nn.Irrep],
+    ):
+        super().__init__()
+        self.irreps_x = irreps_x
+        self.irreps_y = irreps_y
+        self.irreps_out = irreps_out
+        self.weighted_sum = e3nn.Linear(irreps_out)
+
+    def __call__(self, x, y):
+        ia_x = e3nn.IrrepsArray(self.irreps_x, x)
+        ia_y = e3nn.IrrepsArray(self.irreps_y, y)
+        ia_out = e3nn.tensor_product(ia_x, ia_y, filter_ir_out=self.irreps_out)
+        weighted_ia_out = self.weighted_sum(ia_out)
+        return weighted_ia_out.array
+
+
 class SymmetricContraction(hk.Module):
     r"""
     Create higher body-order tensors transformig according to some irreps.
