@@ -97,22 +97,21 @@ class ContractionToIrrep(hk.Module):
         # U matrix for scalar irrep_out is missing its first dimension (size 1),
         # we need to add it manually:
         self.scalar_out = irrep_out.is_scalar()
-        with jax.ensure_compile_time_eval():
-            U_matrices = []
-            for nu in range(1, max_body_order):
-                U = U_matrix_real(
-                    irreps_in=e3nn.Irreps(irreps_in),
-                    irreps_out=irrep_out,
-                    correlation=nu,
-                )[-1]
-                if irreps_in == [e3nn.Irrep("0e")]:
-                    # U matrix for single scalar input is missing all but its
-                    # last dimension (all size 1), we need to add it manually
-                    for _ in range(nu):
-                        U = U[None]
-                U_matrices.append(U)
 
-            self.U_matrices = U_matrices
+        U_matrices = []
+        for nu in range(1, max_body_order):
+            U = U_matrix_real(
+                irreps_in=e3nn.Irreps(irreps_in),
+                irreps_out=irrep_out,
+                correlation=nu,
+            )[-1]
+            if irreps_in == [e3nn.Irrep("0e")]:
+                # U matrix for single scalar input is missing all but its
+                # last dimension (all size 1), we need to add it manually
+                for _ in range(nu):
+                    U = U[None]
+            U_matrices.append(U)
+        self.U_matrices = U_matrices
 
         self.equation_init = "...ik,ekc,bci,be -> bc..."
         self.equation_weighting = "...k,ekc,be->bc..."
