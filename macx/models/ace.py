@@ -26,7 +26,6 @@ class ACELayer(MessagePassingLayer):
         max_body_order: int,
         embedding_irreps: Sequence[e3nn.Irrep],
         mix_atomic_basis: bool = True,
-        n_node_type: int,
     ):
         super().__init__(ilayer, shared)
         self.mix_atomic_basis = mix_atomic_basis
@@ -35,7 +34,7 @@ class ACELayer(MessagePassingLayer):
             self.edge_feat_irreps,
             self.embedding_dim,
             max_body_order,
-            n_node_type,
+            self.n_node_type,
         )
         if mix_atomic_basis:
             self.atomic_basis_weights = hk.get_parameter(
@@ -44,10 +43,10 @@ class ACELayer(MessagePassingLayer):
                 init=hk.initializers.VarianceScaling(),
             )
             acc = 0
-            self.split_idxs = []
+            self.edge_split_idxs = []
             for ir in self.edge_feat_irreps[:-1]:
                 acc += 2 * ir.l + 1
-                self.split_idxs.append(acc)
+                self.edge_split_idxs.append(acc)
 
     def get_update_edges_fn(self):
         return None
@@ -60,7 +59,7 @@ class ACELayer(MessagePassingLayer):
                 num_segments=self.n_nodes,
             )
             if self.mix_atomic_basis:
-                As = jnp.split(A, self.split_idxs, axis=-1)
+                As = jnp.split(A, self.edge_split_idxs, axis=-1)
                 A = jnp.concatenate(
                     [
                         jnp.einsum("kj,bji->bki", weight, A)
@@ -74,7 +73,7 @@ class ACELayer(MessagePassingLayer):
 
     def get_update_nodes_fn(self):
         def update_nodes(nodes, A):
-            B = self.symmetrize(A, nodes["node_types"])
+            B = self.symmetrize(A, nodes["type"])
             return B
 
         return update_nodes
@@ -98,9 +97,9 @@ class ACE(GraphNeuralNetwork):
         layer_kwargs = layer_kwargs or {}
         layer_kwargs.setdefault("max_body_order", max_body_order)
         layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
-        layer_kwargs.setdefault("n_node_type", len(node_types))
         share = {
             "edge_feat_irreps": edge_feat_irreps,
+            "n_node_type": len(elements),
         }
         super().__init__(
             n_nodes,
@@ -129,7 +128,7 @@ class ACE(GraphNeuralNetwork):
 
     def node_factory(self, node_attrs):
         r"""Return the onehot encoded node types"""
-        return {"node_types": to_onehot(node_attrs, self.node_types)}
+        return {"type": to_onehot(node_attrs, self.node_types)}
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]
