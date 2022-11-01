@@ -1,5 +1,3 @@
-from functools import partial
-
 import haiku as hk
 import jax.numpy as jnp
 
@@ -139,7 +137,7 @@ class GraphNeuralNetwork(hk.Module):
         """
         raise NotImplementedError
 
-    def edge_factory(self, r, occupancies):
+    def edge_factory(self, r, occupancies, custom_mask):
         r"""Return a function that builds all the edges used in the GNN."""
         mask_val = r.shape[0] + 1
         edge_factory = GraphEdgeBuilder(
@@ -149,7 +147,7 @@ class GraphNeuralNetwork(hk.Module):
             (mask_val, mask_val),
             self.edge_feature_callback,
         )
-        return edge_factory(r, r, occupancies)
+        return edge_factory(r, r, occupancies, custom_mask)
 
     @classmethod
     @property
@@ -176,7 +174,11 @@ class GraphNeuralNetwork(hk.Module):
             dtype=jnp.int32,
             init=self.init_state,
         )
-        graph_edges, occupancies = self.edge_factory(r, occupancies)
+        if node_attrs is not None:
+            custom_mask = jnp.logical_and(node_attrs[None, :], node_attrs[:, None])
+        else:
+            custom_mask = None
+        graph_edges, occupancies = self.edge_factory(r, occupancies, custom_mask)
         hk.set_state("occupancies", occupancies)
         graph_nodes = self.node_factory(node_attrs)
         graph = Graph(

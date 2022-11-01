@@ -1,7 +1,6 @@
 from collections import namedtuple
 
 import jax.numpy as jnp
-from jax.tree_util import tree_map, tree_structure, tree_transpose
 
 GraphEdges = namedtuple("GraphEdges", "senders receivers features")
 Graph = namedtuple("Graph", "nodes edges")
@@ -41,6 +40,10 @@ def mask_self_edges(idx):
         jnp.arange(idx.shape[0], dtype=jnp.int32), (idx.shape[0], 1)
     )
     return jnp.where(self_mask, idx.shape[0], idx)
+
+
+def mask_custom_edges(idx, mask):
+    return jnp.where(mask, idx.shape[1], idx)
 
 
 def prune_graph_edges(
@@ -169,7 +172,7 @@ def GraphEdgeBuilder(
             returns some data (features) computed for the edges.
     """
 
-    def build(pos_sender, pos_receiver, occupancies):
+    def build(pos_sender, pos_receiver, occupancies, custom_mask=None):
         r"""
         Build graph edges.
 
@@ -196,6 +199,8 @@ def GraphEdgeBuilder(
 
         if mask_self:
             edges_idx = mask_self_edges(edges_idx)
+        if custom_mask is not None:
+            edges_idx = mask_custom_edges(edges_idx, custom_mask)
         edges, occupancy = prune_graph_edges(
             pos_sender,
             pos_receiver,
