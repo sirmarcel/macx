@@ -53,6 +53,10 @@ class ACELayer(MessagePassingLayer):
 
     def get_aggregate_edges_for_nodes_fn(self):
         def aggregate_edges_for_nodes(nodes, edges):
+            print("edge_features shape")
+            print(edges.features.shape)
+            print("edge receivers shape")
+            print(edges.receivers.shape)
             A = ops.segment_sum(
                 data=edges.features,
                 segment_ids=edges.receivers,
@@ -73,7 +77,7 @@ class ACELayer(MessagePassingLayer):
 
     def get_update_nodes_fn(self):
         def update_nodes(nodes, A):
-            B = self.symmetrize(A, nodes["type"])
+            B = self.symmetrize(A, nodes["node_type"])
             return B
 
         return update_nodes
@@ -99,7 +103,7 @@ class ACE(GraphNeuralNetwork):
         layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
         share = {
             "edge_feat_irreps": edge_feat_irreps,
-            "n_node_type": len(elements),
+            "n_node_type": len(node_types),
         }
         super().__init__(
             n_nodes,
@@ -128,7 +132,7 @@ class ACE(GraphNeuralNetwork):
 
     def node_factory(self, node_attrs):
         r"""Return the onehot encoded node types"""
-        return {"type": to_onehot(node_attrs, self.node_types)}
+        return {"node_type": to_onehot(node_attrs, self.node_types)}
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]

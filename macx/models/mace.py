@@ -1,10 +1,13 @@
+from typing import Optional, Sequence
+
 import e3nn_jax as e3nn
 import jax.numpy as jnp
 from jax import ops
 
-from ..gnn import EdgeFeature, GraphNeuralNetwork
+from ..gnn import GraphNeuralNetwork
+from ..gnn.edge_features import EdgeFeatures
 from ..tools.e3nn_ext import ArrayLinear
-from .ace import ACELayer
+from .ace import ACELayer, to_onehot
 from .symmetric_contraction import WeightedTensorProduct
 
 
@@ -15,16 +18,21 @@ class MACELayer(ACELayer):
         **ace_kwargs,
     ):
         super().__init__(*ace_args, **ace_kwargs)
-        emb_irreps = [e3nn.Irrep("0e")] if self.first_layer else self.embedding_irreps
-        self.prev_embed_mixing_layer = ArrayLinear(emb_irreps, emb_irreps, self.embedding_dim)
-        self.message_mixing_layer = ArrayLinear(
-            self.embedding_irreps, self.embedding_irreps, self.embedding_dim
+        embedding_irreps = ace_kwargs["embedding_irreps"]
+        emb_irreps = [e3nn.Irrep("0e")] if self.first_layer else embedding_irreps
+        self.prev_embed_mixing_layer = ArrayLinear(
+            emb_irreps, emb_irreps, self.embedding_dim
         )
-        self.embed_mixing_layer = ArrayLinear(
-            self.embedding_irreps,
-            self.embedding_irreps,
-            self.embedding_dim,
-            channel_out=self.n_node_type,
+        self.message_mixing_layer = ArrayLinear(
+            embedding_irreps, embedding_irreps, self.embedding_dim
+        )
+        if not self.first_layer:
+            self.embed_mixing_layer = ArrayLinear(
+                embedding_irreps,
+                embedding_irreps,
+                self.embedding_dim,
+                channel_out=self.n_node_type,
+            )
         self.wtp = WeightedTensorProduct(
             self.edge_feat_irreps,
             emb_irreps,
@@ -38,8 +46,9 @@ class MACELayer(ACELayer):
         ace_aggregate = super().get_aggregate_edges_for_nodes_fn()
 
         def aggregate_edges_for_nodes(nodes, edges):
-            embedding = self.embed_linear(nodes["embedding"])
-            updated_edges = self.wtp(edges.features, embedding)
+            embedding = self.prev_embed_mixing_layer(nodes["embedding"])
+            updated_features = self.wtp(edges.features, embedding[edges.senders])
+            updated_edges = edges._replace(features=updated_features)
             return ace_aggregate(nodes, updated_edges)
 
         return aggregate_edges_for_nodes
@@ -49,12 +58,20 @@ class MACELayer(ACELayer):
 
         def update_nodes(nodes, A):
             messages = ace_update_nodes(nodes, A)
-            node_embeddings = jnp.einsum(
-                "ijkl,ij->ikl",
-                self.embed_mixing_layer(nodes["embedding"]),
-                nodes["node_type"],
-            ) + self.message_mixing_layer(messages)
-            return node_embeddings
+            # TODO: implement tensor product residual,
+            # so different layers can have different irreps
+            residual = (
+                0
+                if self.first_layer
+                else jnp.einsum(
+                    "ijkl,ij->ikl",
+                    self.embed_mixing_layer(nodes["embedding"]),
+                    nodes["node_type"],
+                )
+            )
+            update = self.message_mixing_layer(messages)
+            nodes["embedding"] = residual + update
+            return nodes["embedding"] if self.last_layer else nodes
 
         return update_nodes
 
@@ -65,22 +82,23 @@ class MACE(GraphNeuralNetwork):
         n_nodes: int,
         embedding_dim: int,
         cutoff: float,
-        n_interactions: int,
         max_body_order: int,
-        embedding_irreps: Sequence[e3nn.Irrep],
+        embedding_irreps: Sequence[Sequence[e3nn.Irrep]],
         edge_feat_irreps: Sequence[e3nn.Irrep],
         node_types: Sequence[int],
         *,
         edge_feat_factory=None,
         edge_feat_kwargs=None,
-        layer_kwargs=None,
+        layer_kwargs: Optional[Sequence[dict]] = None,
     ):
-        layer_kwargs = layer_kwargs or {}
-        layer_kwargs.setdefault("max_body_order", max_body_order)
-        layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
+        n_interactions = len(embedding_irreps)
+        layer_kwargs = layer_kwargs or [{} for _ in embedding_irreps]
+        for i, emb_irrep in enumerate(embedding_irreps):
+            layer_kwargs[i].setdefault("max_body_order", max_body_order)
+            layer_kwargs[i].setdefault("embedding_irreps", emb_irrep)
         share = {
             "edge_feat_irreps": edge_feat_irreps,
-            "n_node_type": len(elements),
+            "n_node_type": len(node_types),
         }
         super().__init__(
             n_nodes,
@@ -96,11 +114,6 @@ class MACE(GraphNeuralNetwork):
             embedding_dim, cutoff, edge_feat_irreps, **(edge_feat_kwargs or {})
         )
         self.node_types = node_types
-        self.initial_embedding = (
-            hk.Embed(self.n_node_type, self.embedding_dim)
-            if initial_embedding
-            else None
-        )
 
     @classmethod
     @property
@@ -114,11 +127,11 @@ class MACE(GraphNeuralNetwork):
 
     def node_factory(self, node_attrs):
         r"""Return initial embeddings and onehot encoded node types"""
-        if self.initial_embedding:
-            init_emb = self.initial_embedding(jnp.arange(len(node_attrs)))
-        else:
-            init_emb = jnp.ones((len(node_attrs), self.embedding_dim))
-        return {"embedding": init_emb, "type": node_attrs}
+        init_emb = jnp.ones((len(node_attrs), self.embedding_dim, 1))
+        return {
+            "embedding": init_emb,
+            "node_type": to_onehot(node_attrs, self.node_types),
+        }
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]

@@ -1,3 +1,4 @@
+import jax.numpy as jnp
 from e3nn_jax import IrrepsArray, Linear
 
 
@@ -18,4 +19,6 @@ class ArrayLinear(Linear):
         x = IrrepsArray(self.mult_irreps_in, x.reshape(*leading_dims, 1, -1))
         out = super().__call__(x)
         out = out.array.reshape(*leading_dims, self.channel_out, embedding_dim, -1)
-        return jnp.squeeze(out, axis=-3) # remove singular channel dimension
+        return (
+            jnp.squeeze(out, axis=-3) if self.channel_out == 1 else out
+        )  # remove singular channel dimension

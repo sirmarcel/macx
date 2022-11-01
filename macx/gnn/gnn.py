@@ -1,3 +1,5 @@
+from typing import Sequence
+
 import haiku as hk
 import jax.numpy as jnp
 
@@ -106,7 +108,11 @@ class GraphNeuralNetwork(hk.Module):
             self.layer_factory(
                 i,
                 share_with_layers,
-                **(layer_kwargs or {}),
+                **(
+                    layer_kwargs[i]
+                    if isinstance(layer_kwargs, Sequence)
+                    else (layer_kwargs or {})
+                ),
             )
             for i in range(n_interactions)
         ]
