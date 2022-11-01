@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from jax import ops
 
 from ..gnn import EdgeFeature, GraphNeuralNetwork
+from ..tools.e3nn_ext import ArrayLinear
 from .ace import ACELayer
 from .symmetric_contraction import SymmetricContraction
 
@@ -27,6 +28,15 @@ class MACELayer(ACELayer):
             for ir in self.embedding_irreps[:-1]:
                 acc += 2 * ir.l + 1
                 self.embed_split_idxs.append(acc)
+        self.message_mixing_layer = ArrayLinear(
+            embedding_irreps, embedding_irreps, self.embedding_dim
+        )
+        self.embedding_mixing_layer = ArrayLinear(
+            embedding_irreps,
+            embedding_irreps,
+            self.embedding_dim,
+            channel_out=self.n_node_type,
+        )
 
     def get_update_edges_fn(self):
         return None
@@ -61,9 +71,13 @@ class MACELayer(ACELayer):
         ace_update_nodes = super().get_update_nodes_fn()
 
         def update_nodes(nodes, A):
-            B = self.symmetrize(A, nodes["types"])
-            return jnp.einsum("kj,bji->bki", self.mix_Bs, B)
-            return ace_update_nodes(nodes, A)
+            messages = ace_update_nodes(nodes, A)
+            node_embeddings = jnp.einsum(
+                "ijkl,ij->ikl",
+                self.node_mixing_layer(nodes["embedding"]),
+                nodes["node_type"],
+            ) + jnp.squeeze(self.message_mixing_layer(messages), axis=-3)
+            return node_embeddings
 
         return update_nodes
 
