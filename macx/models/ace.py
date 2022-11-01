@@ -1,5 +1,4 @@
-from functools import partial
-from typing import Optional, Sequence
+from typing import Sequence
 
 import e3nn_jax as e3nn
 import haiku as hk
@@ -9,6 +8,13 @@ from jax import ops
 from ..gnn import GraphNeuralNetwork, MessagePassingLayer
 from ..gnn.edge_features import EdgeFeatures
 from .symmetric_contraction import SymmetricContraction
+
+
+def to_onehot(features, node_types):
+    ones = []
+    for i, e in enumerate(node_types):
+        ones.append(jnp.where(features == e, jnp.ones(1), jnp.zeros(1))[..., None])
+    return jnp.concatenate(ones, axis=-1)
 
 
 class ACELayer(MessagePassingLayer):
@@ -83,7 +89,7 @@ class ACE(GraphNeuralNetwork):
         max_body_order: int,
         embedding_irreps: Sequence[e3nn.Irrep],
         edge_feat_irreps: Sequence[e3nn.Irrep],
-        elements: Sequence[int],
+        node_types: Sequence[int],
         *,
         edge_feat_factory=None,
         edge_feat_kwargs=None,
@@ -92,7 +98,7 @@ class ACE(GraphNeuralNetwork):
         layer_kwargs = layer_kwargs or {}
         layer_kwargs.setdefault("max_body_order", max_body_order)
         layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
-        layer_kwargs.setdefault("n_node_type", len(elements))
+        layer_kwargs.setdefault("n_node_type", len(node_types))
         share = {
             "edge_feat_irreps": edge_feat_irreps,
         }
@@ -109,6 +115,7 @@ class ACE(GraphNeuralNetwork):
         self.edge_features = edge_feat_factory(
             embedding_dim, cutoff, edge_feat_irreps, **(edge_feat_kwargs or {})
         )
+        self.node_types = node_types
 
     @classmethod
     @property
@@ -122,7 +129,7 @@ class ACE(GraphNeuralNetwork):
 
     def node_factory(self, node_attrs):
         r"""Return the onehot encoded node types"""
-        return {"node_types": node_attrs}
+        return {"node_types": to_onehot(node_attrs, self.node_types)}
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]
