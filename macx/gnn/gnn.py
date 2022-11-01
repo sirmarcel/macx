@@ -157,7 +157,7 @@ class GraphNeuralNetwork(hk.Module):
         r"""Return the class of the interaction layer to be used."""
         return MessagePassingLayer
 
-    def __call__(self, r, node_attrs=None):
+    def __call__(self, r, node_attrs):
         r"""
         Execute the graph neural network.
 

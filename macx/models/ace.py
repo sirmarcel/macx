@@ -20,7 +20,7 @@ class ACELayer(MessagePassingLayer):
         max_body_order: int,
         embedding_irreps: Sequence[e3nn.Irrep],
         mix_atomic_basis: bool = True,
-        num_elements: Optional[int] = None,
+        n_node_type: int,
     ):
         super().__init__(ilayer, shared)
         self.mix_atomic_basis = mix_atomic_basis
@@ -29,7 +29,7 @@ class ACELayer(MessagePassingLayer):
             self.edge_feat_irreps,
             self.embedding_dim,
             max_body_order,
-            num_elements,
+            n_node_type,
         )
         if mix_atomic_basis:
             self.atomic_basis_weights = hk.get_parameter(
@@ -83,6 +83,7 @@ class ACE(GraphNeuralNetwork):
         max_body_order: int,
         embedding_irreps: Sequence[e3nn.Irrep],
         edge_feat_irreps: Sequence[e3nn.Irrep],
+        elements: Sequence[int],
         *,
         edge_feat_factory=None,
         edge_feat_kwargs=None,
@@ -91,6 +92,7 @@ class ACE(GraphNeuralNetwork):
         layer_kwargs = layer_kwargs or {}
         layer_kwargs.setdefault("max_body_order", max_body_order)
         layer_kwargs.setdefault("embedding_irreps", embedding_irreps)
+        layer_kwargs.setdefault("n_node_type", len(elements))
         share = {
             "edge_feat_irreps": edge_feat_irreps,
         }
@@ -119,11 +121,8 @@ class ACE(GraphNeuralNetwork):
         return zeros
 
     def node_factory(self, node_attrs):
-        r"""Return the initial embeddings as a :class:`GraphNodes` instance."""
-        return {
-            "initial_embeddings": jnp.ones((self.n_nodes, 1)),
-            "node_types": node_attrs,
-        }
+        r"""Return the onehot encoded node types"""
+        return {"node_types": node_attrs}
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
         r_ij = pos_receiver[receiver_idx] - pos_sender[sender_idx]

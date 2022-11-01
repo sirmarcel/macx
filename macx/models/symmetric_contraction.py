@@ -38,14 +38,14 @@ class SymmetricContraction(hk.Module):
         irreps_in: Sequence[e3nn.Irrep],
         n_feature: int,
         max_body_order: int,
-        num_elements: Optional[int] = None,
+        n_node_type: int,
     ):
         super().__init__()
         self.irreps_out = irreps_out
         contractions = {}
         for irrep_out in irreps_out:
             contractions[str(irrep_out)] = ContractionToIrrep(
-                irrep_out, irreps_in, n_feature, max_body_order, num_elements
+                irrep_out, irreps_in, n_feature, max_body_order, n_node_type
             )
         self.contractions = contractions
 
@@ -85,7 +85,7 @@ class ContractionToIrrep(hk.Module):
         irreps_in: Sequence[e3nn.Irrep],
         n_feature: int,
         max_body_order: int,
-        num_elements: Optional[int] = None,
+        n_node_type: int,
     ):
         super().__init__(f"contraction_to_irrep_{irrep_out}")
         if max_body_order < 2:
@@ -94,7 +94,6 @@ class ContractionToIrrep(hk.Module):
                 f"has to be at least 2, got {max_body_order}"
             )
         self.correlation = max_body_order - 2
-        self.element_dependent = num_elements is not None
         # U matrix for scalar irrep_out is missing its first dimension (size 1),
         # we need to add it manually:
         self.scalar_out = irrep_out.is_scalar()
@@ -115,12 +114,8 @@ class ContractionToIrrep(hk.Module):
 
             self.U_matrices = U_matrices
 
-        if self.element_dependent:
-            self.equation_init = "...ik,ekc,bci,be -> bc..."
-            self.equation_weighting = "...k,kec,be->bc..."
-        else:
-            self.equation_init = "...ik,kc,bci -> bc..."
-            self.equation_weighting = "...k,kc->c..."
+        self.equation_init = "...ik,ekc,bci,be -> bc..."
+        self.equation_weighting = "...k,ekc,be->bc..."
         self.equation_contract = "bc...i,bci->bc..."
         weights = []
         for nu in range(1, max_body_order):
@@ -129,29 +124,28 @@ class ContractionToIrrep(hk.Module):
             weights.append(
                 hk.get_parameter(
                     f"coupling_weights_{nu}",
-                    (
-                        [num_elements, n_coupling, n_feature]
-                        if self.element_dependent
-                        else [n_coupling, n_feature]
-                    ),
+                    [n_node_type, n_coupling, n_feature],
                     init=hk.initializers.VarianceScaling(),
                 )
             )
         self.weights = weights
 
-    def __call__(self, A, node_attrs):
+    def __call__(self, A, node_types):
+        # node_types is onehot encoded, it selects the index of weights,
+        # and is usually faster than indexing
         B = jnp.einsum(
             self.equation_init,
             self.U_matrices[self.correlation],
             self.weights[self.correlation],
-            *((A,) if node_attrs is None else (A, node_attrs)),
+            A,
+            node_types,
         )
         for corr in reversed(range(self.correlation)):
             c_tensor = jnp.einsum(
                 self.equation_weighting,
                 self.U_matrices[corr],
                 self.weights[corr],
-                *(() if node_attrs is None else (node_attrs,)),
+                node_types,
             )
             c_tensor = c_tensor + B
             B = jnp.einsum(self.equation_contract, c_tensor, A)
