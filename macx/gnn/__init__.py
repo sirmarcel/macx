@@ -1,2 +1,2 @@
-from .edge_feature import EdgeFeature
+from .edge_features import EdgeFeatures
 from .gnn import GraphNeuralNetwork, MessagePassingLayer
