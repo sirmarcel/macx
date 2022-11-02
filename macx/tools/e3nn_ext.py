@@ -1,29 +1,99 @@
 from functools import wraps
-from typing import Optional, Sequence
+from itertools import chain, repeat
+from typing import Callable, Optional, Sequence
 
 import e3nn_jax as e3nn
 import haiku as hk
+import jax
+
+
+def linear_weight_shapes(
+    irreps_in: e3nn.Irreps,
+    irreps_out: e3nn.Irreps,
+    channels_in: int,
+    channels_out: Optional[int] = None,
+    mix_channels: bool = False,
+    new_channel_dim: Optional[int] = None,
+):
+    channels_out = channels_out or channels_in
+    shapes = []
+    for mul_in, ir_in in irreps_in:
+        for mul_out, ir_out in irreps_out:
+            if ir_in == ir_out:
+                shapes.append((mul_in, mul_out))
+    return shapes
+
+
+class FunctionalGeneralLinear:
+    def __init__(
+        self,
+        irreps_in: e3nn.Irreps,
+        irreps_out: Sequence[e3nn.Irrep],
+        channels_in: int,
+        channels_out: Optional[int] = None,
+        mix_channels: bool = False,
+        new_channel_dim: Optional[int] = None,
+    ):
+        if (channels_out or new_channel_dim) and not mix_channels:
+            raise ValueError(
+                "mix_channels has to be True if "
+                "channels_out or new_channel_dim is given"
+            )
+        channels_out = channels_out or channels_in
+
+        self.irreps_in = irreps_in
+        self.irreps_out = irreps_out
+
+        self.channels_in = channels_in
+        self.mix_channels = mix_channels
+        self.channels_out = channels_out
+        self.new_channel_dim = new_channel_dim
+
+        self.in_irreps_lin = e3nn.Irreps(
+            (mul * channels_in if mix_channels else mul, ir) for mul, ir in irreps_in
+        )
+        self.out_irreps_lin = e3nn.Irreps(
+            (channels_out * (new_channel_dim or 1) if mix_channels else 1, ir)
+            for ir in irreps_out
+        )
+
+    def __call__(self, weights, x):
+        if self.mix_channels:
+            x = x.axis_to_mul()
+        lin = e3nn.FunctionalLinear(self.in_irreps_lin, self.out_irreps_lin)
+        linear = lambda x: lin(weights, x)
+        for _ in range(x.ndim - 1):
+            linear = jax.vmap(linear)
+
+        out = linear(x)
+        if self.mix_channels:
+            out = out.mul_to_axis()
+        if self.new_channel_dim:
+            out = out.reshape(
+                (*out.shape[:-2], self.new_channel_dim, self.channels_out, -1)
+            )
+        return out
 
 
 class GeneralLinear(hk.Module):
     r"""
-    General equivariant linear layer.
-
+        General equivariant linear layer.
     The input is assumed to be of shape
-    [:math:`...`, :math:`N_\text{channels in}`, :math:`\sum_i m_i(2l_i+1)`] where
-    :math:`i` runs over the input irreps, and :math:`m_i` is the multiplicity of the
-    :math:`i`th irrep.
+        [:math:`...`, :math:`N_\text{channels in}`, :math:`\sum_i m_i(2l_i+1)`] where
+        :math:`i` runs over the input irreps, and :math:`m_i` is the multiplicity of the
+        :math:`i`th irrep.
 
-    Args:
-        irreps_out (Sequence[e3nn_jax.Irrep]): sequence of output irreps.
-        mix_channels (bool): default False, whether to mix the different input channels.
-            Must be true if either :data:`channels_out` or :data:`new_channel_dim`
-            is given.
-        channels_out (int): optional, the number of output channels, mixed from
-            the input channels. If :data:`None`, it is set to :math:`N_\text{channels in}.
-        new_channel_dim (int): optional, the dimension of a new channel axes inserted
-            before the input channels axis. If :data:`None`, no new channel axis
-            is inserted. The new channels are mixed from the input channels.
+        Args:
+            irreps_out (Sequence[e3nn_jax.Irrep]): sequence of output irreps.
+            mix_channels (bool): default False, whether to mix the different input channels.
+                Must be true if either :data:`channels_out` or :data:`new_channel_dim`
+                is given.
+            channels_out (int): optional, the number of output channels, mixed from
+                the input channels. If :data:`None`, it is set to :math:`N_\text{channels in}.
+            new_channel_dim (int): optional, the dimension of a new channel axes inserted
+                before the input channels axis. If :data:`None`, no new channel axis
+                is inserted. The new channels are mixed from the input channels.
+            weight_factory (Callable): optional, subnetwork that creates the linear weights
     """
 
     def __init__(
@@ -32,6 +102,7 @@ class GeneralLinear(hk.Module):
         mix_channels: bool = False,
         channels_out: Optional[int] = None,
         new_channel_dim: Optional[int] = None,
+        weight_factory: Optional[Callable] = None,
     ):
         if (channels_out or new_channel_dim) and not mix_channels:
             raise ValueError(
@@ -43,50 +114,65 @@ class GeneralLinear(hk.Module):
         self.mix_channels = mix_channels
         self.channels_out = channels_out
         self.new_channel_dim = new_channel_dim
+        self.weight_factory = weight_factory
 
-    def __call__(self, x):
-        emb_dim = x.array.shape[-2]
-        channels_out = self.channels_out or emb_dim
-        linear = (
-            e3nn.Linear(self.irreps_out)
-            if not self.mix_channels
-            else e3nn.Linear(
-                self.irreps_out, channels_out * (self.new_channel_dim or 1)
-            )
+    def __call__(self, x, weight_factory_input=None):
+        fgl = FunctionalGeneralLinear(
+            x.irreps,
+            self.irreps_out,
+            x.shape[-2] if x.ndim > 1 else 0,
+            self.channels_out,
+            self.mix_channels,
+            self.new_channel_dim,
         )
-        out = linear(x)
-        if self.new_channel_dim:
-            out = out.reshape((*out.shape[:-2], self.new_channel_dim, channels_out, -1))
-        return out
+        weight_shapes = linear_weight_shapes(
+            fgl.in_irreps_lin,
+            fgl.out_irreps_lin,
+            fgl.channels_in,
+            fgl.channels_out,
+            fgl.mix_channels,
+            fgl.new_channel_dim,
+        )
+        if self.weight_factory:
+            weights = self.weight_factory(weight_shapes)(weight_factory_input)
+        else:
+            weights = []
+            for i, shape in enumerate(weight_shapes):
+                weights.append(
+                    hk.get_parameter(
+                        f"weight_{i}", shape, init=hk.initializers.VarianceScaling()
+                    )
+                )
+        return fgl(weights, x)
 
 
 class WeightedTensorProduct(hk.Module):
     def __init__(
         self,
-        irreps_x: Sequence[e3nn.Irrep],
-        irreps_y: Sequence[e3nn.Irrep],
         irreps_out: Sequence[e3nn.Irrep],
+        weight_factory: Optional[Callable] = None,
+        mix_channels: bool = False,
     ):
         super().__init__()
-        self.irreps_x = irreps_x
-        self.irreps_y = irreps_y
         self.irreps_out = irreps_out
-        self.weighted_sum = GeneralLinear(irreps_out)
+        self.weighted_sum = GeneralLinear(
+            irreps_out, mix_channels, weight_factory=weight_factory
+        )
 
-    def __call__(self, x, y):
-        ia_x = e3nn.IrrepsArray(self.irreps_x, x)
-        ia_y = e3nn.IrrepsArray(self.irreps_y, y)
-        ia_out = e3nn.tensor_product(ia_x, ia_y, filter_ir_out=self.irreps_out)
-        weighted_ia_out = self.weighted_sum(ia_out)
-        return weighted_ia_out.array
+    def __call__(self, x, y, weight_factory_input=None):
+        ia_out = e3nn.tensor_product(x, y, filter_ir_out=self.irreps_out).simplify()
+        weighted_ia_out = self.weighted_sum(ia_out, weight_factory_input)
+        return weighted_ia_out
 
 
-def convert_irreps_array(*irreps: Sequence[e3nn.Irrep]):
+def convert_irreps_array(*input_irreps: Sequence[e3nn.Irrep]):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            assert len(args) == len(irreps)
-            args = (e3nn.IrrepsArray(irrep, arg) for irrep, arg in zip(irreps, args))
+            args = (
+                e3nn.IrrepsArray(irrep, arg) if irrep else arg
+                for irrep, arg in zip(chain(input_irreps, repeat(None)), args)
+            )
             outs = func(*args, **kwargs)
             return (
                 tuple(out.array for out in outs)

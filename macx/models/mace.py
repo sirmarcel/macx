@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 import e3nn_jax as e3nn
 import jax.numpy as jnp
@@ -15,11 +15,14 @@ class MACELayer(ACELayer):
         self,
         *ace_args,
         prev_embed_irreps: Sequence[e3nn.Irrep],
+        convolution_weight_factory: Optional[Callable] = None,
+        residual_weight_factory: Optional[Callable] = None,
         **ace_kwargs,
     ):
         super().__init__(*ace_args, **ace_kwargs)
         embedding_irreps = ace_kwargs["embedding_irreps"]
-        self.prev_embed_mixing_layer = convert_irreps_array(prev_embed_irreps)(
+
+        self.conv_embed_mixing_layer = convert_irreps_array(prev_embed_irreps)(
             GeneralLinear(prev_embed_irreps, mix_channels=True)
         )
 
@@ -27,18 +30,25 @@ class MACELayer(ACELayer):
             GeneralLinear(embedding_irreps, mix_channels=True)
         )
         if not self.first_layer:
-            self.embed_mixing_layer = convert_irreps_array(embedding_irreps)(
+            self.embed_mixing_layer = convert_irreps_array(prev_embed_irreps)(
                 GeneralLinear(
-                    embedding_irreps,
+                    prev_embed_irreps,
                     mix_channels=True,
                     new_channel_dim=self.n_node_type,
                 )
             )
-        self.wtp = WeightedTensorProduct(
-            self.edge_feat_irreps,
-            prev_embed_irreps,
-            self.edge_feat_irreps,
+        self.convolution_tp = convert_irreps_array(
+            self.edge_feat_irreps, prev_embed_irreps
+        )(
+            WeightedTensorProduct(
+                self.edge_feat_irreps,
+                convolution_weight_factory,
+            )
         )
+        if not self.first_layer:
+            self.residual_tp = convert_irreps_array(
+                embedding_irreps, prev_embed_irreps
+            )(WeightedTensorProduct(embedding_irreps, residual_weight_factory))
 
     def get_update_edges_fn(self):
         return None
@@ -47,8 +57,10 @@ class MACELayer(ACELayer):
         ace_aggregate = super().get_aggregate_edges_for_nodes_fn()
 
         def aggregate_edges_for_nodes(nodes, edges):
-            embedding = self.prev_embed_mixing_layer(nodes["embedding"])
-            updated_features = self.wtp(edges.features, embedding[edges.senders])
+            embedding = self.conv_embed_mixing_layer(nodes["embedding"])
+            updated_features = self.convolution_tp(
+                edges.features, embedding[edges.senders], edges.features
+            )
             updated_edges = edges._replace(features=updated_features)
             return ace_aggregate(nodes, updated_edges)
 
@@ -59,19 +71,17 @@ class MACELayer(ACELayer):
 
         def update_nodes(nodes, A):
             messages = ace_update_nodes(nodes, A)
-            # TODO: implement tensor product residual,
-            # so different layers can have different irreps
-            residual = (
-                0
-                if self.first_layer
-                else jnp.einsum(
+            update = self.message_mixing_layer(messages)
+            if self.first_layer:
+                nodes["embedding"] = update
+            else:
+                residual = jnp.einsum(
                     "ijkl,ij->ikl",
                     self.embed_mixing_layer(nodes["embedding"]),
                     nodes["node_type"],
                 )
-            )
-            update = self.message_mixing_layer(messages)
-            nodes["embedding"] = residual + update
+                nodes["embedding"] = self.residual_tp(update, residual, update)
+
             return nodes["embedding"] if self.last_layer else nodes
 
         return update_nodes
