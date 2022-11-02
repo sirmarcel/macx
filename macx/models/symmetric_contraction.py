@@ -46,28 +46,6 @@ class FunctionalWeightedTensorProduct:
         return weighted_ia_out.array
 
 
-class WeightedTensorProduct(hk.Module):
-    def __init__(
-        self,
-        irreps_x: Sequence[e3nn.Irrep],
-        irreps_y: Sequence[e3nn.Irrep],
-        irreps_out: Sequence[e3nn.Irrep],
-        channels_out: int = 1,
-    ):
-        super().__init__()
-        self.irreps_x = irreps_x
-        self.irreps_y = irreps_y
-        self.irreps_out = irreps_out
-        self.weighted_sum = e3nn.Linear(irreps_out)
-
-    def __call__(self, x, y):
-        ia_x = e3nn.IrrepsArray(self.irreps_x, x)
-        ia_y = e3nn.IrrepsArray(self.irreps_y, y)
-        ia_out = e3nn.tensor_product(ia_x, ia_y, filter_ir_out=self.irreps_out)
-        weighted_ia_out = self.weighted_sum(ia_out)
-        return weighted_ia_out.array
-
-
 class SymmetricContraction(hk.Module):
     r"""
     Create higher body-order tensors transformig according to some irreps.

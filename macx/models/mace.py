@@ -6,9 +6,8 @@ from jax import ops
 
 from ..gnn import GraphNeuralNetwork
 from ..gnn.edge_features import EdgeFeatures
-from ..tools.e3nn_ext import ArrayLinear
+from ..tools.e3nn_ext import GeneralLinear, WeightedTensorProduct, convert_irreps_array
 from .ace import ACELayer, to_onehot
-from .symmetric_contraction import WeightedTensorProduct
 
 
 class MACELayer(ACELayer):
@@ -20,19 +19,20 @@ class MACELayer(ACELayer):
     ):
         super().__init__(*ace_args, **ace_kwargs)
         embedding_irreps = ace_kwargs["embedding_irreps"]
-        #  emb_irreps = [e3nn.Irrep("0e")] if self.first_layer else embedding_irreps
-        self.prev_embed_mixing_layer = ArrayLinear(
-            prev_embed_irreps, prev_embed_irreps, self.embedding_dim
+        self.prev_embed_mixing_layer = convert_irreps_array(prev_embed_irreps)(
+            GeneralLinear(prev_embed_irreps, mix_channels=True)
         )
-        self.message_mixing_layer = ArrayLinear(
-            embedding_irreps, embedding_irreps, self.embedding_dim
+
+        self.message_mixing_layer = convert_irreps_array(embedding_irreps)(
+            GeneralLinear(embedding_irreps, mix_channels=True)
         )
         if not self.first_layer:
-            self.embed_mixing_layer = ArrayLinear(
-                embedding_irreps,
-                embedding_irreps,
-                self.embedding_dim,
-                channel_out=self.n_node_type,
+            self.embed_mixing_layer = convert_irreps_array(embedding_irreps)(
+                GeneralLinear(
+                    embedding_irreps,
+                    mix_channels=True,
+                    new_channel_dim=self.n_node_type,
+                )
             )
         self.wtp = WeightedTensorProduct(
             self.edge_feat_irreps,
