@@ -19,7 +19,9 @@ class FunctionalWeightedTensorProduct:
         self.irreps_x = irreps_x
         self.irreps_y = irreps_y
         self.irreps_out = irreps_out
-        self.ir_tp_out = e3nn.tensor_product(e3nn.Irreps(irreps_x), e3nn.Irreps(irreps_y), filter_ir_out=irreps_out).simplify()
+        self.ir_tp_out = e3nn.tensor_product(
+            e3nn.Irreps(irreps_x), e3nn.Irreps(irreps_y), filter_ir_out=irreps_out
+        ).simplify()
         self.weighted_sum = e3nn.FunctionalLinear(self.ir_tp_out, irreps_out)
 
     @property
@@ -50,6 +52,7 @@ class WeightedTensorProduct(hk.Module):
         irreps_x: Sequence[e3nn.Irrep],
         irreps_y: Sequence[e3nn.Irrep],
         irreps_out: Sequence[e3nn.Irrep],
+        channels_out: int = 1,
     ):
         super().__init__()
         self.irreps_x = irreps_x

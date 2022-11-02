@@ -53,10 +53,6 @@ class ACELayer(MessagePassingLayer):
 
     def get_aggregate_edges_for_nodes_fn(self):
         def aggregate_edges_for_nodes(nodes, edges):
-            print("edge_features shape")
-            print(edges.features.shape)
-            print("edge receivers shape")
-            print(edges.receivers.shape)
             A = ops.segment_sum(
                 data=edges.features,
                 segment_ids=edges.receivers,

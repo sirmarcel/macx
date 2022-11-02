@@ -15,13 +15,14 @@ class MACELayer(ACELayer):
     def __init__(
         self,
         *ace_args,
+        prev_embed_irreps: Sequence[e3nn.Irrep],
         **ace_kwargs,
     ):
         super().__init__(*ace_args, **ace_kwargs)
         embedding_irreps = ace_kwargs["embedding_irreps"]
-        emb_irreps = [e3nn.Irrep("0e")] if self.first_layer else embedding_irreps
+        #  emb_irreps = [e3nn.Irrep("0e")] if self.first_layer else embedding_irreps
         self.prev_embed_mixing_layer = ArrayLinear(
-            emb_irreps, emb_irreps, self.embedding_dim
+            prev_embed_irreps, prev_embed_irreps, self.embedding_dim
         )
         self.message_mixing_layer = ArrayLinear(
             embedding_irreps, embedding_irreps, self.embedding_dim
@@ -35,7 +36,7 @@ class MACELayer(ACELayer):
             )
         self.wtp = WeightedTensorProduct(
             self.edge_feat_irreps,
-            emb_irreps,
+            prev_embed_irreps,
             self.edge_feat_irreps,
         )
 
@@ -96,6 +97,10 @@ class MACE(GraphNeuralNetwork):
         for i, emb_irrep in enumerate(embedding_irreps):
             layer_kwargs[i].setdefault("max_body_order", max_body_order)
             layer_kwargs[i].setdefault("embedding_irreps", emb_irrep)
+            layer_kwargs[i].setdefault(
+                "prev_embed_irreps",
+                [e3nn.Irrep("0y")] if i == 0 else embedding_irreps[i - 1],
+            )
         share = {
             "edge_feat_irreps": edge_feat_irreps,
             "n_node_type": len(node_types),
