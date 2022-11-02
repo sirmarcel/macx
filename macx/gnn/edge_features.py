@@ -29,6 +29,15 @@ class PolynomialEnvelope(Envelope):
 
 
 class RadialBasis:
+    r"""
+    Base class for the radial bases.
+
+    Args:
+        n_rbf (int): the number of basis functions
+        r_cut (float): the cutoff radius for the envelope
+        envelope_factory (Callable): optional, creates the distance envelope
+        kwargs: (dict): optional, kwargs for the envelope function
+    """
     def __init__(
         self,
         n_rbf,
@@ -115,6 +124,20 @@ class GaussianBasis(RadialBasis):
 
 
 class CombinedRadialBases(RadialBasis):
+    r"""
+    Class combining multiple radial bases. The total number of basis functions
+    :math:`n_{rbf}` has to match the sum of the numbers of basis functions of 
+    the constituents.
+
+
+    Args:
+        n_rbf (int): the total number of basis functions
+        r_cut (float): the cutoff radius for the radial bases
+        n_rbfs (Sequence[int]): the number of basis function per basis respectively
+        factories (Sequence[Callable]): the factories of the bases respectively
+        kwargs: (Sequence[dict]): optional, kwargs for the bases respectively
+    """
+
     def __init__(
         self,
         n_rbf: int,
@@ -145,6 +168,22 @@ class CombinedRadialBases(RadialBasis):
 
 
 class EdgeFeatures:
+    r"""
+    Class combining the radial and angular bases to obtain edge features from
+    difference vectors.
+
+
+    Args:
+        n_rbf (int): the number of radial basis functions
+        r_cut (float): the cutoff radius for the radial basis
+        irreps (Sequence[e3nn_jax.Irrep]): the irreducible representations for
+            the angular basis
+        equivariant: default True, if False the distinction between feature
+            dimension and irreps dimension is removed
+        radial_basis_factory (Callable): optional, creates the radial basis
+        radial_basis_kwargs (dict): optional, kwargs for the radial basis
+    """
+
     def __init__(
         self,
         n_rbf: int,
