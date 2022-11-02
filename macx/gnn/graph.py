@@ -43,6 +43,15 @@ def mask_self_edges(idx):
 
 
 def mask_custom_edges(idx, mask):
+    r"""
+    Mask the edges according to :data:`mask`.
+
+    Args:
+        idx (int, (:math:`N_\text{nodes}`, :math:`N_\text{nodes}`)): matrix of
+            receiving node indeces.
+        mask (bool, (:math:`N_\text{nodes}`, :math:`N_\text{nodes}`)): mask definition,
+            entries that contain :data:`False` will be masked out.
+    """
     return jnp.where(mask, idx.shape[1], idx)
 
 
@@ -81,7 +90,7 @@ def prune_graph_edges(
             returns some data (features) computed for the edges.
 
     Returns:
-        ~jax.types.GraphEdges: object containing the indeces of the edge
+        GraphEdges: object containing the indeces of the edge
         sending and edge receiving nodes, along with the features associated
         with the edges.
     """
@@ -141,7 +150,7 @@ def prune_graph_edges(
 
 
 def difference_callback(pos_sender, pos_receiver, sender_idx, receiver_idx):
-    r"""feature_callback computing the Euclidian difference vector for each edge."""
+    r"""Feature_callback computing the Euclidian difference vector for each edge."""
     if len(pos_sender) == 0 or len(pos_receiver) == 0:
         return jnp.zeros((len(sender_idx), 3))
     diffs = pos_receiver[receiver_idx] - pos_sender[sender_idx]

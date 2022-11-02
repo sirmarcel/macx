@@ -2,7 +2,6 @@ from typing import Callable, Optional, Sequence
 
 import e3nn_jax as e3nn
 import jax.numpy as jnp
-from jax import ops
 
 from ..gnn import GraphNeuralNetwork
 from ..gnn.edge_features import EdgeFeatures
@@ -11,12 +10,28 @@ from .ace import ACELayer, to_onehot
 
 
 class MACELayer(ACELayer):
+    r"""
+    Compute a single MACE interaction layer.
+
+    Args:
+        max_body_order (int): the maximum body order up to which node embeddings are
+            constructed.
+        embedding_irreps (Sequence[e3nn.Irrep]): the irreps of the node embeddings.
+        mix_atomic_basis (bool): default :data:`True`, whether to apply a linear layer
+            on the initial node embeddings, before symmetrizing them.
+        convolution_weight_factory (Optional[Callable]): a callable returning the
+            linear weights to be used in the edge features--node embeddings
+            :tensor product.
+        residual_weight_factory (Optional[Callable]): a callable returning the
+            linear weights to be used in the embedding update tensor product
+    """
+
     def __init__(
         self,
         *ace_args,
         prev_embed_irreps: Sequence[e3nn.Irrep],
         convolution_weight_factory: Optional[Callable] = None,
-        residual_weight_factory: Optional[Callable] = None,
+        update_weight_factory: Optional[Callable] = None,
         **ace_kwargs,
     ):
         super().__init__(*ace_args, **ace_kwargs)
@@ -46,9 +61,9 @@ class MACELayer(ACELayer):
             )
         )
         if not self.first_layer:
-            self.residual_tp = convert_irreps_array(
-                embedding_irreps, prev_embed_irreps
-            )(WeightedTensorProduct(embedding_irreps, residual_weight_factory))
+            self.update_tp = convert_irreps_array(embedding_irreps, prev_embed_irreps)(
+                WeightedTensorProduct(embedding_irreps, update_weight_factory)
+            )
 
     def get_update_edges_fn(self):
         return None
@@ -80,7 +95,7 @@ class MACELayer(ACELayer):
                     self.embed_mixing_layer(nodes["embedding"]),
                     nodes["node_type"],
                 )
-                nodes["embedding"] = self.residual_tp(update, residual, update)
+                nodes["embedding"] = self.update_tp(update, residual, update)
 
             return nodes["embedding"] if self.last_layer else nodes
 
@@ -88,6 +103,26 @@ class MACELayer(ACELayer):
 
 
 class MACE(GraphNeuralNetwork):
+    r"""
+    The MACE model.
+
+    Args:
+        n_nodes (int): the maximum number of nodes in the graph.
+        embedding_dim (int): the embedding dimension, should be equal to the number of
+            radial basis functions.
+        cutoff (float): distance cutoff, beyond which interactions are not considered.
+        max_body_order (int): the maximum body order up to which node embeddings are
+            constructed.
+        embedding_irreps (Sequence[e3nn.Irrep]): the irreps of the node embeddings.
+        edge_feat_irreps (Sequence[e3nn.Irrep]): the irreps of the edge features.
+        node_types (Sequence[int]): the list of possible node types.
+        edge_feat_factory (Optional[Callable]): the edge feature constructing class,
+            defaults to :class:`~gnn.edge_features.EdgeFeatures`.
+        edge_feat_kwargs (Optional[dict]): extra arguments to be passed to
+            :data:`edge_feat_factory`.
+        layer_kwargs (dict): optional, kwargs to be passed to the layers.
+    """
+
     def __init__(
         self,
         n_nodes: int,

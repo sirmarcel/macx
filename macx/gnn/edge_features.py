@@ -1,6 +1,5 @@
 from collections.abc import Sequence
-from functools import partial
-from typing import Literal, Optional
+from typing import Optional
 
 import e3nn_jax as e3nn
 import jax.numpy as jnp

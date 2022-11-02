@@ -122,7 +122,7 @@ class GraphNeuralNetwork(hk.Module):
         raise NotImplementedError
 
     def node_factory(self, node_attrs):
-        r"""Return the initial embeddings as a :class:`GraphNodes` instance."""
+        r"""Return the initial node representations."""
         raise NotImplementedError
 
     def edge_feature_callback(self, pos_sender, pos_receiver, sender_idx, receiver_idx):
@@ -144,7 +144,7 @@ class GraphNeuralNetwork(hk.Module):
         raise NotImplementedError
 
     def edge_factory(self, r, occupancies, custom_mask):
-        r"""Return a function that builds all the edges used in the GNN."""
+        r"""Return a function that builds the edges used in the GNN."""
         mask_val = r.shape[0] + 1
         edge_factory = GraphEdgeBuilder(
             self.cutoff,
@@ -167,6 +167,7 @@ class GraphNeuralNetwork(hk.Module):
 
         Args:
             r (float, (:math:`N_\text{nodes}`, 3)): coordinates of the graph nodes.
+            node_attrs (Any): additional information about the nodes (like atom type).
 
         Returns:
             float, (:math:`N_\text{nodes}`, :data:`embedding_dim`):
