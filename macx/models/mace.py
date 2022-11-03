@@ -5,7 +5,11 @@ import jax.numpy as jnp
 
 from ..gnn import GraphNeuralNetwork
 from ..gnn.edge_features import EdgeFeatures
-from ..tools.e3nn_ext import GeneralLinear, WeightedTensorProduct, convert_irreps_array
+from ..tools.e3nn_ext import (
+    EquivariantLinear,
+    WeightedTensorProduct,
+    convert_irreps_array,
+)
 from .ace import ACELayer, to_onehot
 
 
@@ -38,18 +42,18 @@ class MACELayer(ACELayer):
         embedding_irreps = ace_kwargs["embedding_irreps"]
 
         self.conv_embed_mixing_layer = convert_irreps_array(prev_embed_irreps)(
-            GeneralLinear(prev_embed_irreps, mix_channels=True)
+            EquivariantLinear(prev_embed_irreps, mix_channels=True)
         )
 
         self.message_mixing_layer = convert_irreps_array(embedding_irreps)(
-            GeneralLinear(embedding_irreps, mix_channels=True)
+            EquivariantLinear(embedding_irreps, mix_channels=True)
         )
         if not self.first_layer:
             self.embed_mixing_layer = convert_irreps_array(prev_embed_irreps)(
-                GeneralLinear(
+                EquivariantLinear(
                     prev_embed_irreps,
                     mix_channels=True,
-                    new_channel_dim=self.n_node_type,
+                    channels_out=self.embedding_dim * self.n_node_type,
                 )
             )
         self.convolution_tp = convert_irreps_array(
@@ -90,9 +94,12 @@ class MACELayer(ACELayer):
             if self.first_layer:
                 nodes["embedding"] = update
             else:
+                *batch_dims, emb_dim, irrep_dim = nodes["embedding"].shape
                 residual = jnp.einsum(
                     "ijkl,ij->ikl",
-                    self.embed_mixing_layer(nodes["embedding"]),
+                    self.embed_mixing_layer(nodes["embedding"]).reshape(
+                        *batch_dims, self.n_node_type, emb_dim, irrep_dim
+                    ),
                     nodes["node_type"],
                 )
                 nodes["embedding"] = self.update_tp(update, residual, update)

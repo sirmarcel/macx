@@ -1,14 +1,15 @@
 from functools import wraps
 from itertools import chain, repeat
-from typing import Callable, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Union
 
 import e3nn_jax as e3nn
 import haiku as hk
 import jax
+import jax.numpy as jnp
 
 __all__ = [
     "convert_irreps_array",
-    "GeneralLinear",
+    "EquivariantLinear",
     "linear_weight_shapes",
     "WeightedTensorProduct",
 ]
@@ -19,7 +20,7 @@ def linear_weight_shapes(
     irreps_out: e3nn.Irreps,
 ):
     r"""
-    Calculate the shapes of the weights used by :class:GeneralLinear.
+    Calculate the shapes of the weights used by :class:EquivariantLinear.
 
     Return a list of tuples giving the shapes of the weights necessary to perform
     the equivariant linear layer specified by the arguments.
@@ -36,7 +37,38 @@ def linear_weight_shapes(
     return shapes
 
 
-class FunctionalGeneralLinear:
+class FunctionalLinear(e3nn.FunctionalLinear):
+    def __call__(
+        self, ws: Union[List[jnp.ndarray], jnp.ndarray], input: e3nn.IrrepsArray
+    ) -> e3nn.IrrepsArray:
+        input = input.convert(self.irreps_in)
+        if input.ndim != 1:
+            raise ValueError(
+                "FunctionalLinear does not support broadcasting, "
+                f"input shape is {input.shape}"
+            )
+
+        if not isinstance(ws, list):
+            ws = self.split_weights(ws)
+
+        paths = [
+            ins.path_weight * w
+            if ins.i_in == -1
+            else (
+                None
+                if input.list[ins.i_in] is None
+                # kfac_jax doesn't recognize this einsum as a proper linear layer:
+                # jnp.einsum("uw,ui->wi", w, input.list[ins.i_in]),
+                # use low level dot_general instead
+                else ins.path_weight
+                * jax.lax.dot_general(w, input.list[ins.i_in], (((0,), (0,)), ((), ())))
+            )
+            for ins, w in zip(self.instructions, ws)
+        ]
+        return self.aggregate_paths(paths, input.shape[:-1])
+
+
+class FunctionalEquivariantLinear:
     def __init__(
         self,
         irreps_in: e3nn.Irreps,
@@ -44,13 +76,9 @@ class FunctionalGeneralLinear:
         channels_in: int,
         channels_out: Optional[int] = None,
         mix_channels: bool = False,
-        new_channel_dim: Optional[int] = None,
     ):
-        if (channels_out or new_channel_dim) and not mix_channels:
-            raise ValueError(
-                "mix_channels has to be True if "
-                "channels_out or new_channel_dim is given"
-            )
+        if channels_out and not mix_channels:
+            raise ValueError("mix_channels has to be True if channels_out is given")
         channels_out = channels_out or channels_in
 
         self.irreps_in = irreps_in
@@ -59,20 +87,18 @@ class FunctionalGeneralLinear:
         self.channels_in = channels_in
         self.mix_channels = mix_channels
         self.channels_out = channels_out
-        self.new_channel_dim = new_channel_dim
 
         self.in_irreps_lin = e3nn.Irreps(
             (mul * channels_in if mix_channels else mul, ir) for mul, ir in irreps_in
         )
         self.out_irreps_lin = e3nn.Irreps(
-            (channels_out * (new_channel_dim or 1) if mix_channels else 1, ir)
-            for ir in irreps_out
+            (channels_out if mix_channels else 1, ir) for ir in irreps_out
         )
 
     def __call__(self, weights, x):
         if self.mix_channels:
             x = x.axis_to_mul()
-        lin = e3nn.FunctionalLinear(self.in_irreps_lin, self.out_irreps_lin)
+        lin = FunctionalLinear(self.in_irreps_lin, self.out_irreps_lin)
 
         def linear(x):
             return lin(weights, x)
@@ -83,14 +109,10 @@ class FunctionalGeneralLinear:
         out = linear(x)
         if self.mix_channels:
             out = out.mul_to_axis()
-        if self.new_channel_dim:
-            out = out.reshape(
-                (*out.shape[:-2], self.new_channel_dim, self.channels_out, -1)
-            )
         return out
 
 
-class GeneralLinear(hk.Module):
+class EquivariantLinear(hk.Module):
     r"""
     General equivariant linear layer.
 
@@ -101,16 +123,11 @@ class GeneralLinear(hk.Module):
 
     Args:
         irreps_out (Sequence[e3nn_jax.Irrep]): sequence of output irreps.
-        mix_channels (bool): default False, whether to mix the different input
-            channels. Must be true if either :data:`channels_out` or
-            :data:`new_channel_dim` is given.
+        mix_channels (bool): default True, whether to mix the different input
+            channels. Must be true if either :data:`channels_out`.
         channels_out (int): optional, the number of output channels, mixed from
             the input channels. If :data:`None`, it is set to
             :math:`N_\text{channels in}.
-        new_channel_dim (int): optional, the dimension of a new channel axes
-            inserted before the input channels axis. If :data:`None`, no new
-            channel axis is inserted. The new channels are mixed from the input
-            channels.
         weight_factory (Callable): optional, subnetwork that creates the linear
             weights.
     """
@@ -118,33 +135,25 @@ class GeneralLinear(hk.Module):
     def __init__(
         self,
         irreps_out: Sequence[e3nn.Irrep],
-        mix_channels: bool = False,
+        mix_channels: bool = True,
         channels_out: Optional[int] = None,
-        new_channel_dim: Optional[int] = None,
         weight_factory: Optional[Callable] = None,
     ):
-        if (channels_out or new_channel_dim) and not mix_channels:
-            raise ValueError(
-                "mix_channels has to be True if "
-                "channels_out or new_channel_dim is given"
-            )
         super().__init__()
         self.irreps_out = irreps_out
         self.mix_channels = mix_channels
         self.channels_out = channels_out
-        self.new_channel_dim = new_channel_dim
         self.weight_factory = weight_factory
 
     def __call__(self, x, weight_factory_input=None):
-        fgl = FunctionalGeneralLinear(
+        fel = FunctionalEquivariantLinear(
             x.irreps,
             self.irreps_out,
             x.shape[-2] if x.ndim > 1 else 0,
             self.channels_out,
             self.mix_channels,
-            self.new_channel_dim,
         )
-        weight_shapes = linear_weight_shapes(fgl.in_irreps_lin, fgl.out_irreps_lin)
+        weight_shapes = linear_weight_shapes(fel.in_irreps_lin, fel.out_irreps_lin)
         if self.weight_factory:
             weights = self.weight_factory(weight_shapes)(weight_factory_input)
         else:
@@ -155,15 +164,15 @@ class GeneralLinear(hk.Module):
                         f"weight_{i}", shape, init=hk.initializers.VarianceScaling()
                     )
                 )
-        return fgl(weights, x)
+        return fel(weights, x)
 
 
 class WeightedTensorProduct(hk.Module):
     r"""
     Computed a weighted fully-connected tensor product.
 
-    Performs an :data:`e3nn_jax.tensor_product`, and applies a :class:`GeneralLinear`
-    layer on the resulting tensors.
+    Performs an :data:`e3nn_jax.tensor_product`, and applies a
+    :class:`EquivariantLinear` layer on the resulting tensors.
 
     Args:
         irreps_out (Sequence[e3nn.Irrep]): the irreps of the output tensor.
@@ -182,7 +191,7 @@ class WeightedTensorProduct(hk.Module):
     ):
         super().__init__()
         self.irreps_out = irreps_out
-        self.weighted_sum = GeneralLinear(
+        self.weighted_sum = EquivariantLinear(
             irreps_out, mix_channels, weight_factory=weight_factory
         )
 

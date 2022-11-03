@@ -6,7 +6,7 @@ from jax import ops
 
 from ..gnn import GraphNeuralNetwork, MessagePassingLayer
 from ..gnn.edge_features import EdgeFeatures
-from ..tools.e3nn_ext import GeneralLinear, convert_irreps_array
+from ..tools.e3nn_ext import EquivariantLinear, convert_irreps_array
 from ..tools.symmetric_contraction import SymmetricContraction
 
 
@@ -59,7 +59,7 @@ class ACELayer(MessagePassingLayer):
         )
         if mix_atomic_basis:
             self.atomic_basis_layer = convert_irreps_array(embedding_irreps)(
-                GeneralLinear(embedding_irreps, mix_channels=True)
+                EquivariantLinear(embedding_irreps, mix_channels=True)
             )
 
     def get_update_edges_fn(self):
